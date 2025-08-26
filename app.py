@@ -183,11 +183,9 @@ if selected_celdas:
     stations_available = stations_available[stations_available['Celda_XY'].isin(selected_celdas)]
 stations_options = sorted(stations_available['Nom_Est'].unique())
 
-# --- INICIO: MEJORA DE SELECCIÓN DE ESTACIONES ---
-select_all = st.sidebar.checkbox("Seleccionar/Deseleccionar Todas las Estaciones", value=True)
+select_all = st.sidebar.checkbox("Seleccionar/Deseleccionar Todas", value=True)
 default_selection = stations_options if select_all else []
 selected_stations = st.sidebar.multiselect('3. Seleccionar Estaciones', options=stations_options, default=default_selection)
-# --- FIN: MEJORA ---
 
 # Filtro de Años
 años_disponibles = sorted([int(col) for col in gdf_stations.columns if str(col).isdigit()])
@@ -279,6 +277,25 @@ with tab2:
         for _, row in gdf_filtered.iterrows():
             folium.Marker([row['Latitud_geo'], row['Longitud_geo']], tooltip=f"{row['Nom_Est']}<br>{row['municipio']}").add_to(m)
         folium_static(m, width=900, height=600)
+
+        # --- INICIO: SECCIÓN DEL MAPA ANIMADO RESTAURADA ---
+        st.markdown("---")
+        st.subheader("Mapa Animado de Precipitación Anual")
+        if not df_anual_melted.empty:
+            fig_mapa_animado = px.scatter_geo(
+                df_anual_melted,
+                lat='Latitud_geo', lon='Longitud_geo',
+                color='Precipitación', size='Precipitación',
+                hover_name='Nom_Est', animation_frame='Año',
+                projection='natural earth', title='Precipitación Anual por Estación',
+                color_continuous_scale=px.colors.sequential.YlGnBu,
+            )
+            fig_mapa_animado.update_geos(fitbounds="locations", showcountries=True)
+            st.plotly_chart(fig_mapa_animado, use_container_width=True)
+        else:
+            st.warning("No hay datos para generar el mapa animado.")
+        # --- FIN: SECCIÓN DEL MAPA ANIMADO RESTAURADA ---
+
     else: st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
 
 with tab3:
@@ -302,18 +319,15 @@ with tab4:
         st.plotly_chart(fig_enso, use_container_width=True)
         
         st.subheader("Correlación entre Anomalía ONI y Precipitación")
-        # --- INICIO: CORRECCIÓN PARA VALUEERROR ---
-        # Asegura que ambas columnas son numéricas antes de calcular la correlación
         df_analisis['Anomalia_ONI'] = pd.to_numeric(df_analisis['Anomalia_ONI'], errors='coerce')
         df_analisis['Precipitation'] = pd.to_numeric(df_analisis['Precipitation'], errors='coerce')
         df_analisis.dropna(subset=['Anomalia_ONI', 'Precipitation'], inplace=True)
-        # --- FIN: CORRECCIÓN ---
 
-        if not df_analisis.empty:
+        if not df_analisis.empty and len(df_analisis) > 1:
             correlation = df_analisis['Anomalia_ONI'].corr(df_analisis['Precipitation'])
             st.metric("Coeficiente de Correlación", f"{correlation:.2f}")
         else:
-            st.warning("No hay datos válidos para calcular la correlación después de la limpieza.")
+            st.warning("No hay suficientes datos válidos para calcular la correlación después de la limpieza.")
     else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
     
 with tab5:
