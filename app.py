@@ -13,7 +13,19 @@ import os
 import io
 import numpy as np
 import re
-from folium.plugins import ScaleControl # Importación directa para eliminar la advertencia
+
+# --- INICIO: CÓDIGO CORREGIDO PARA IMPORTACIÓN SEGURA ---
+# Se restaura el bloque try/except para evitar que la app se detenga si el plugin no está disponible,
+# pero se elimina el mensaje st.warning para cumplir con la solicitud.
+try:
+    from folium.plugins import ScaleControl
+except ImportError:
+    class ScaleControl:
+        def __init__(self, *args, **kwargs):
+            pass
+        def add_to(self, m):
+            pass
+# --- FIN: CÓDIGO CORREGIDO ---
 
 #--- Configuración de la página
 st.set_page_config(layout="wide", page_title="Visor de Precipitación y ENSO")
@@ -246,10 +258,23 @@ with tab2:
         map_centering = st.radio("Opciones de centrado", ("Automático", "Predefinido"), horizontal=True)
         if map_centering == "Automático":
             m = folium.Map(location=[gdf_filtered['Latitud_geo'].mean(), gdf_filtered['Longitud_geo'].mean()], zoom_start=6)
-            m.fit_bounds(gdf_filtered.total_bounds)
-        else:
-            # Lógica para centrado predefinido
-            pass
+            bounds = gdf_filtered.total_bounds
+            if all(bounds):
+                m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+        else: # Predefinido
+            if 'map_view' not in st.session_state:
+                st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
+            
+            col1, col2 = st.columns(2)
+            if col1.button("Ver Colombia"):
+                st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
+            if col2.button("Ver Estaciones Seleccionadas"):
+                bounds = gdf_filtered.total_bounds
+                if all(bounds):
+                    st.session_state.map_view = {"location": [(bounds[1]+bounds[3])/2, (bounds[0]+bounds[2])/2], "zoom": 8}
+            
+            m = folium.Map(location=st.session_state.map_view["location"], zoom_start=st.session_state.map_view["zoom"])
+
         ScaleControl().add_to(m)
         for _, row in gdf_filtered.iterrows():
             folium.Marker([row['Latitud_geo'], row['Longitud_geo']], tooltip=f"{row['Nom_Est']}<br>{row['municipio']}").add_to(m)
