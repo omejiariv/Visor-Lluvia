@@ -113,9 +113,9 @@ for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
     if col in df_enso.columns:
         df_enso[col] = df_enso[col].astype(str).str.replace(',', '.', regex=True).astype(float)
 meses_es_en = {'ene': 'Jan', 'feb': 'Feb', 'mar': 'Mar', 'abr': 'Apr', 'may': 'May', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Aug', 'sep': 'Sep', 'oct': 'Oct', 'nov': 'Nov', 'dic': 'Dec'}
-df_enso['Year'] = df_enso['Year'].astype(int)
+df_enso['Año'] = df_enso['Año'].astype(int)
 df_enso['mes_en'] = df_enso['mes'].str.lower().map(meses_es_en)
-df_enso['fecha_merge'] = pd.to_datetime(df_enso['Year'].astype(str) + '-' + df_enso['mes_en'], format='%Y-%b').dt.strftime('%Y-%m')
+df_enso['fecha_merge'] = pd.to_datetime(df_enso['Año'].astype(str) + '-' + df_enso['mes_en'], format='%Y-%b').dt.strftime('%Y-%m')
 
 # Precipitación anual (mapa)
 for col in ['Longitud', 'Latitud']:
@@ -131,15 +131,15 @@ gdf_stations['Latitud_geo'] = gdf_stations.geometry.y
 
 # Precipitación mensual
 df_precip_mensual.columns = df_precip_mensual.columns.str.strip().str.lower()
-df_precip_mensual.rename(columns={'ano': 'Year', 'mes': 'Mes'}, inplace=True)
+df_precip_mensual.rename(columns={'ano': 'Año', 'mes': 'Mes'}, inplace=True)
 station_cols = [col for col in df_precip_mensual.columns if col.isdigit()]
 if not station_cols:
     st.error("No se encontraron columnas de estación en el archivo de precipitación mensual.")
     st.stop()
-df_long = df_precip_mensual.melt(id_vars=['Year', 'Mes'], value_vars=station_cols, var_name='Id_estacion', value_name='Precipitation')
+df_long = df_precip_mensual.melt(id_vars=['Año', 'Mes'], value_vars=station_cols, var_name='Id_estacion', value_name='Precipitation')
 df_long['Precipitation'] = pd.to_numeric(df_long['Precipitation'], errors='coerce')
 df_long.dropna(subset=['Precipitation'], inplace=True)
-df_long['Fecha'] = pd.to_datetime(df_long['Year'].astype(str) + '-' + df_long['Mes'].astype(str), format='%Y-%m')
+df_long['Fecha'] = pd.to_datetime(df_long['Año'].astype(str) + '-' + df_long['Mes'].astype(str), format='%Y-%m')
 
 # Mapeo y Fusión de Estaciones
 gdf_stations['Id_estacio'] = gdf_stations['Id_estacio'].astype(str).str.strip()
@@ -175,7 +175,7 @@ if not filtered_stations:
     st.stop()
 
 años_disponibles = sorted([int(col) for col in gdf_stations.columns if str(col).isdigit()])
-year_range = st.sidebar.slider(
+Año_range = st.sidebar.slider(
     "3. Seleccione el rango de años",
     min_value=min(años_disponibles),
     max_value=max(años_disponibles),
@@ -193,13 +193,13 @@ with tab1:
     
     # Datos para los gráficos
     df_anual_filtered = gdf_stations[gdf_stations['Nom_Est'].isin(filtered_stations)]
-    year_cols = [str(y) for y in range(year_range[0], year_range[1] + 1) if str(y) in df_anual_filtered.columns]
-    df_anual_melted = df_anual_filtered.melt(id_vars=['Nom_Est'], value_vars=year_cols, var_name='Año', value_name='Precipitación')
+    Año_cols = [str(y) for y in range(Año_range[0], Año_range[1] + 1) if str(y) in df_anual_filtered.columns]
+    df_anual_melted = df_anual_filtered.melt(id_vars=['Nom_Est'], value_vars=Año_cols, var_name='Año', value_name='Precipitación')
     
     df_monthly_filtered = df_long[
         (df_long['Nom_Est'].isin(filtered_stations)) &
-        (df_long['Year'] >= year_range[0]) &
-        (df_long['Year'] <= year_range[1])
+        (df_long['Año'] >= Año_range[0]) &
+        (df_long['Año'] <= Año_range[1])
     ]
 
     # Gráfico Anual
