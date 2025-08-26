@@ -128,7 +128,6 @@ if month_col_name_enso is None:
     st.stop()
 
 df_enso.dropna(subset=[year_col_name_enso, month_col_name_enso], inplace=True)
-
 for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
     if col in df_enso.columns:
         df_enso[col] = df_enso[col].astype(str).str.replace(',', '.', regex=True).astype(float)
@@ -136,41 +135,61 @@ for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
 df_enso[year_col_name_enso] = df_enso[year_col_name_enso].astype(int)
 df_enso[month_col_name_enso] = df_enso[month_col_name_enso].astype(int)
 
-# --- INICIO: CÓDIGO A PRUEBA DE ERRORES DE FECHA ---
-# Combina año y mes en una cadena de texto
 date_strings = df_enso[year_col_name_enso].astype(str) + '-' + df_enso[month_col_name_enso].astype(str)
-
-# Convierte a fecha, los errores se convertirán en NaT (Not a Time)
 datetime_series = pd.to_datetime(date_strings, errors='coerce')
-
-# Identifica las filas que no se pudieron convertir
 invalid_rows = df_enso[datetime_series.isna()]
 if not invalid_rows.empty:
     st.warning("Se encontraron y omitieron filas con fechas inválidas (ej. mes > 12) en el archivo ENSO. Revise estas filas en su archivo original:")
     st.dataframe(invalid_rows)
 
-# Elimina las filas con fechas inválidas antes de continuar
 df_enso = df_enso[datetime_series.notna()]
-
-# Crea la columna final con las fechas válidas
 df_enso['fecha_merge'] = datetime_series.dropna().dt.strftime('%Y-%m')
-# --- FIN: CÓDIGO A PRUEBA DE ERRORES DE FECHA ---
 
 # Precipitación anual (mapa)
-for col in ['Longitud', 'Latitud']:
-    if col in df_precip_anual.columns:
-        df_precip_anual[col] = df_precip_anual[col].astype(str).str.replace(',', '.', regex=True).astype(float)
+# --- INICIO: LÓGICA ROBUSTA PARA ENCONTRAR COLUMNAS DE COORDENADAS ---
+lon_col_name = None
+for col in df_precip_anual.columns:
+    if 'longitud' in col.lower() or 'lon' in col.lower():
+        lon_col_name = col
+        break
+if lon_col_name is None:
+    st.error(f"Error Crítico: No se encontró una columna para Longitud en el archivo de estaciones (mapaCVENSO.csv). Columnas encontradas: {list(df_precip_anual.columns)}")
+    st.stop()
+
+lat_col_name = None
+for col in df_precip_anual.columns:
+    if 'latitud' in col.lower() or 'lat' in col.lower():
+        lat_col_name = col
+        break
+if lat_col_name is None:
+    st.error(f"Error Crítico: No se encontró una columna para Latitud en el archivo de estaciones (mapaCVENSO.csv). Columnas encontradas: {list(df_precip_anual.columns)}")
+    st.stop()
+# --- FIN: LÓGICA ROBUSTA ---
+
+for col in [lon_col_name, lat_col_name]:
+    df_precip_anual[col] = df_precip_anual[col].astype(str).str.replace(',', '.', regex=True).astype(float)
+
 gdf_stations = gpd.GeoDataFrame(
     df_precip_anual,
-    geometry=gpd.points_from_xy(df_precip_anual['Longitud'], df_precip_anual['Latitud']),
-    crs="EPSG:9377"
-).to_crs("EPSG:4326")
+    geometry=gpd.points_from_xy(df_precip_anual[lon_col_name], df_precip_anual[lat_col_name]), # Usa los nombres de columna encontrados
+    crs="EPSG:9377" # Define el sistema de coordenadas planas de origen
+).to_crs("EPSG:4326") # Transforma a coordenadas geográficas (WGS84)
 gdf_stations['Longitud_geo'] = gdf_stations.geometry.x
 gdf_stations['Latitud_geo'] = gdf_stations.geometry.y
 
+
 # Precipitación mensual
 df_precip_mensual.columns = df_precip_mensual.columns.str.strip().str.lower()
-df_precip_mensual.rename(columns={'ano': 'Año'}, inplace=True)
+year_col_name_precip = None
+for col in df_precip_mensual.columns:
+    if 'año' in col or 'ano' in col:
+        year_col_name_precip = col
+        break
+if year_col_name_precip is None:
+    st.error(f"Error Crítico: No se encontró columna de año ('ano' o 'año') en el archivo de precipitación mensual. Columnas: {list(df_precip_mensual.columns)}")
+    st.stop()
+df_precip_mensual.rename(columns={year_col_name_precip: 'Año'}, inplace=True)
+
 station_cols = [col for col in df_precip_mensual.columns if col.isdigit()]
 if not station_cols:
     st.error("No se encontraron columnas de estación en el archivo de precipitación mensual.")
@@ -178,7 +197,8 @@ if not station_cols:
 df_long = df_precip_mensual.melt(id_vars=['Año', 'mes'], value_vars=station_cols, var_name='Id_estacion', value_name='Precipitation')
 df_long['Precipitation'] = pd.to_numeric(df_long['Precipitation'], errors='coerce')
 df_long.dropna(subset=['Precipitation'], inplace=True)
-df_long['Fecha'] = pd.to_datetime(df_long['Año'].astype(str) + '-' + df_long['mes'].astype(str), format='%Y-%m')
+df_long['Fecha'] = pd.to_datetime(df_long['Año'].astype(str) + '-' + df_long['mes'].astype(str), format='%Y-%m', errors='coerce')
+df_long.dropna(subset=['Fecha'], inplace=True)
 
 # Mapeo y Fusión de Estaciones
 gdf_stations['Id_estacio'] = gdf_stations['Id_estacio'].astype(str).str.strip()
@@ -335,11 +355,12 @@ with tab3:
     
     df_info_table = df_info_table.merge(df_mean_precip, on='Nom_Est', how='left')
     
-    columns_to_show = ['Nom_Est', 'municipio', 'departamento', 'Longitud', 'Latitud', 'Precipitación media anual (mm)']
-    existing_columns = [col for col in columns_to_show if col in df_info_table.columns]
+    columns_to_show = ['Nom_Est', 'municipio', 'departamento', 'Longitud_geo', 'Latitud_geo', 'Precipitación media anual (mm)']
+    df_display = df_info_table[[col for col in columns_to_show if col in df_info_table.columns]].copy()
+    df_display.rename(columns={'Longitud_geo': 'Longitud', 'Latitud_geo': 'Latitud'}, inplace=True)
     
-    if not df_info_table.empty:
-        st.dataframe(df_info_table[existing_columns])
+    if not df_display.empty:
+        st.dataframe(df_display)
     else:
         st.warning("No hay datos para las estaciones seleccionadas.")
 
