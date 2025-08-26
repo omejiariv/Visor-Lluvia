@@ -136,13 +136,25 @@ for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
 df_enso[year_col_name_enso] = df_enso[year_col_name_enso].astype(int)
 df_enso[month_col_name_enso] = df_enso[month_col_name_enso].astype(int)
 
-# --- INICIO: CÓDIGO MODIFICADO PARA MESES NUMÉRICOS ---
-# Crea una columna de fecha directamente a partir de las columnas numéricas de año y mes
-df_enso['fecha_merge'] = pd.to_datetime(
-    df_enso[year_col_name_enso].astype(str) + '-' + df_enso[month_col_name_enso].astype(str)
-).dt.strftime('%Y-%m')
-# --- FIN: CÓDIGO MODIFICADO ---
+# --- INICIO: CÓDIGO A PRUEBA DE ERRORES DE FECHA ---
+# Combina año y mes en una cadena de texto
+date_strings = df_enso[year_col_name_enso].astype(str) + '-' + df_enso[month_col_name_enso].astype(str)
 
+# Convierte a fecha, los errores se convertirán en NaT (Not a Time)
+datetime_series = pd.to_datetime(date_strings, errors='coerce')
+
+# Identifica las filas que no se pudieron convertir
+invalid_rows = df_enso[datetime_series.isna()]
+if not invalid_rows.empty:
+    st.warning("Se encontraron y omitieron filas con fechas inválidas (ej. mes > 12) en el archivo ENSO. Revise estas filas en su archivo original:")
+    st.dataframe(invalid_rows)
+
+# Elimina las filas con fechas inválidas antes de continuar
+df_enso = df_enso[datetime_series.notna()]
+
+# Crea la columna final con las fechas válidas
+df_enso['fecha_merge'] = datetime_series.dropna().dt.strftime('%Y-%m')
+# --- FIN: CÓDIGO A PRUEBA DE ERRORES DE FECHA ---
 
 # Precipitación anual (mapa)
 for col in ['Longitud', 'Latitud']:
