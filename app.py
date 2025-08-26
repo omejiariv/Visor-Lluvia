@@ -106,6 +106,11 @@ gdf_municipios = load_shapefile(uploaded_zip_shapefile)
 if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_municipios]):
     st.stop()
 
+#--- LÍNEA DE DEPURACIÓN ---
+# Esta línea te mostrará los nombres exactos de las columnas del archivo ENSO.
+if df_enso is not None:
+    st.write("Nombres exactos de las columnas en el archivo ENSO:", df_enso.columns)
+
 #--- Preprocesamiento de datos
 # ENSO
 df_enso.columns = [col.strip() for col in df_enso.columns]
