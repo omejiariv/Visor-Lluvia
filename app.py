@@ -14,9 +14,6 @@ import io
 import numpy as np
 import re
 
-# --- INICIO: CÓDIGO CORREGIDO PARA IMPORTACIÓN SEGURA ---
-# Se restaura el bloque try/except para evitar que la app se detenga si el plugin no está disponible,
-# pero se elimina el mensaje st.warning para cumplir con la solicitud.
 try:
     from folium.plugins import ScaleControl
 except ImportError:
@@ -25,7 +22,6 @@ except ImportError:
             pass
         def add_to(self, m):
             pass
-# --- FIN: CÓDIGO CORREGIDO ---
 
 #--- Configuración de la página
 st.set_page_config(layout="wide", page_title="Visor de Precipitación y ENSO")
@@ -42,8 +38,7 @@ h1 { margin-top: 0px; padding-top: 0px; }
 
 #--- Funciones de carga de datos
 @st.cache_data
-def load_data(file_path, sep=';'): # Actualizado para usar punto y coma por defecto
-    """Carga datos desde un archivo CSV, probando varias codificaciones."""
+def load_data(file_path, sep=';'):
     if file_path is None: return None
     try:
         content = file_path.getvalue()
@@ -68,7 +63,6 @@ def load_data(file_path, sep=';'): # Actualizado para usar punto y coma por defe
 
 @st.cache_data
 def load_shapefile(file_path):
-    """Carga un shapefile desde un .zip y lo convierte a WGS84."""
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
@@ -123,6 +117,9 @@ df_enso = df_enso.astype({year_col_enso: int, month_col_enso: int})
 date_strings_enso = df_enso[year_col_enso].astype(str) + '-' + df_enso[month_col_enso].astype(str)
 df_enso['fecha_merge'] = pd.to_datetime(date_strings_enso, errors='coerce').dt.strftime('%Y-%m')
 df_enso.dropna(subset=['fecha_merge'], inplace=True)
+for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
+    if col in df_enso.columns:
+        df_enso[col] = pd.to_numeric(df_enso[col].astype(str).str.replace(',', '.'), errors='coerce')
 
 # Estaciones (mapaCVENSO)
 lon_col = next((col for col in df_precip_anual.columns if 'longitud' in col.lower() or 'lon' in col.lower()), None)
@@ -179,15 +176,18 @@ celdas_list = sorted(gdf_stations['Celda_XY'].unique())
 selected_municipios = st.sidebar.multiselect('1. Filtrar por Municipio', options=municipios_list)
 selected_celdas = st.sidebar.multiselect('2. Filtrar por Celda_XY', options=celdas_list)
 
-# Lógica de filtrado en cascada
 stations_available = gdf_stations
 if selected_municipios:
     stations_available = stations_available[stations_available['municipio'].isin(selected_municipios)]
 if selected_celdas:
     stations_available = stations_available[stations_available['Celda_XY'].isin(selected_celdas)]
-
 stations_options = sorted(stations_available['Nom_Est'].unique())
-selected_stations = st.sidebar.multiselect('3. Seleccionar Estaciones', options=stations_options, default=stations_options)
+
+# --- INICIO: MEJORA DE SELECCIÓN DE ESTACIONES ---
+select_all = st.sidebar.checkbox("Seleccionar/Deseleccionar Todas las Estaciones", value=True)
+default_selection = stations_options if select_all else []
+selected_stations = st.sidebar.multiselect('3. Seleccionar Estaciones', options=stations_options, default=default_selection)
+# --- FIN: MEJORA ---
 
 # Filtro de Años
 años_disponibles = sorted([int(col) for col in gdf_stations.columns if str(col).isdigit()])
@@ -197,7 +197,7 @@ year_range = st.sidebar.slider(
     value=(min(años_disponibles), max(años_disponibles))
 )
 
-# NUEVO: Filtro de Meses
+# Filtro de Meses
 meses_dict = {
     'Enero': 1, 'Febrero': 2, 'Marzo': 3, 'Abril': 4, 'Mayo': 5, 'Junio': 6,
     'Julio': 7, 'Agosto': 8, 'Septiembre': 9, 'Octubre': 10, 'Noviembre': 11, 'Diciembre': 12
@@ -224,7 +224,7 @@ df_monthly_filtered = df_long[
     (df_long['Nom_Est'].isin(selected_stations)) &
     (df_long['Fecha'].dt.year >= year_range[0]) &
     (df_long['Fecha'].dt.year <= year_range[1]) &
-    (df_long['Fecha'].dt.month.isin(meses_numeros)) # Filtro por mes
+    (df_long['Fecha'].dt.month.isin(meses_numeros))
 ]
 
 #--- Pestañas de la aplicación ---
@@ -261,7 +261,7 @@ with tab2:
             bounds = gdf_filtered.total_bounds
             if all(bounds):
                 m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-        else: # Predefinido
+        else:
             if 'map_view' not in st.session_state:
                 st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
             
@@ -290,7 +290,7 @@ with tab3:
 
 with tab4:
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
-    df_analisis = df_monthly_filtered.copy() # Usa datos ya filtrados por mes
+    df_analisis = df_monthly_filtered.copy()
     df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
     df_analisis = pd.merge(df_analisis, df_enso, on='fecha_merge', how='left')
     df_analisis.dropna(subset=['ENSO', 'Anomalia_ONI'], inplace=True)
@@ -302,8 +302,18 @@ with tab4:
         st.plotly_chart(fig_enso, use_container_width=True)
         
         st.subheader("Correlación entre Anomalía ONI y Precipitación")
-        correlation = df_analisis['Anomalia_ONI'].corr(df_analisis['Precipitation'])
-        st.metric("Coeficiente de Correlación", f"{correlation:.2f}")
+        # --- INICIO: CORRECCIÓN PARA VALUEERROR ---
+        # Asegura que ambas columnas son numéricas antes de calcular la correlación
+        df_analisis['Anomalia_ONI'] = pd.to_numeric(df_analisis['Anomalia_ONI'], errors='coerce')
+        df_analisis['Precipitation'] = pd.to_numeric(df_analisis['Precipitation'], errors='coerce')
+        df_analisis.dropna(subset=['Anomalia_ONI', 'Precipitation'], inplace=True)
+        # --- FIN: CORRECCIÓN ---
+
+        if not df_analisis.empty:
+            correlation = df_analisis['Anomalia_ONI'].corr(df_analisis['Precipitation'])
+            st.metric("Coeficiente de Correlación", f"{correlation:.2f}")
+        else:
+            st.warning("No hay datos válidos para calcular la correlación después de la limpieza.")
     else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
     
 with tab5:
