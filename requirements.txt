@@ -11,4 +11,4 @@ shapely
 plotly
 geopandas
 base64
-pip freeze > requirements.txt
+pip freeze
