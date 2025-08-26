@@ -109,38 +109,40 @@ if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_mu
 #--- Preprocesamiento de datos ---
 
 # ENSO
-# Búsqueda robusta para la columna del año
 year_col_name_enso = None
 for col in df_enso.columns:
     if 'año' in col.lower() or 'year' in col.lower():
         year_col_name_enso = col
         break
-
 if year_col_name_enso is None:
-    st.error(f"Error Crítico: No se encontró una columna para el año en el archivo ENSO. Columnas encontradas: {list(df_enso.columns)}. Por favor, asegúrese de que una columna contenga 'Año' o 'Year' en su nombre.")
+    st.error(f"Error Crítico: No se encontró una columna para el año en el archivo ENSO. Columnas encontradas: {list(df_enso.columns)}.")
     st.stop()
 
-# --- INICIO: NUEVA LÓGICA PARA ENCONTRAR LA COLUMNA DEL MES ---
 month_col_name_enso = None
 for col in df_enso.columns:
-    if 'mes' in col.lower(): # Busca 'mes' sin importar mayúsculas/minúsculas
+    if 'mes' in col.lower():
         month_col_name_enso = col
         break
-
 if month_col_name_enso is None:
-    st.error(f"Error Crítico: No se encontró una columna para el mes en el archivo ENSO. Columnas encontradas: {list(df_enso.columns)}. Por favor, asegúrese de que una columna contenga 'mes' en su nombre.")
+    st.error(f"Error Crítico: No se encontró una columna para el mes en el archivo ENSO. Columnas encontradas: {list(df_enso.columns)}.")
     st.stop()
-# --- FIN: NUEVA LÓGICA ---
 
 df_enso.dropna(subset=[year_col_name_enso, month_col_name_enso], inplace=True)
 
 for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
     if col in df_enso.columns:
         df_enso[col] = df_enso[col].astype(str).str.replace(',', '.', regex=True).astype(float)
-meses_es_en = {'ene': 'Jan', 'feb': 'Feb', 'mar': 'Mar', 'abr': 'Apr', 'may': 'May', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Aug', 'sep': 'Sep', 'oct': 'Oct', 'nov': 'Nov', 'dic': 'Dec'}
+
 df_enso[year_col_name_enso] = df_enso[year_col_name_enso].astype(int)
-df_enso['mes_en'] = df_enso[month_col_name_enso].str.lower().map(meses_es_en) # Usa el nombre de columna encontrado
-df_enso['fecha_merge'] = pd.to_datetime(df_enso[year_col_name_enso].astype(str) + '-' + df_enso['mes_en'], format='%Y-%b').dt.strftime('%Y-%m')
+df_enso[month_col_name_enso] = df_enso[month_col_name_enso].astype(int)
+
+# --- INICIO: CÓDIGO MODIFICADO PARA MESES NUMÉRICOS ---
+# Crea una columna de fecha directamente a partir de las columnas numéricas de año y mes
+df_enso['fecha_merge'] = pd.to_datetime(
+    df_enso[year_col_name_enso].astype(str) + '-' + df_enso[month_col_name_enso].astype(str)
+).dt.strftime('%Y-%m')
+# --- FIN: CÓDIGO MODIFICADO ---
+
 
 # Precipitación anual (mapa)
 for col in ['Longitud', 'Latitud']:
