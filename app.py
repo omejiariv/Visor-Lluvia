@@ -56,6 +56,7 @@ def load_data(file_path, sep=','):
     encodings_to_try = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']
     for encoding in encodings_to_try:
         try:
+            # Usa el separador que se le pasa a la función
             df = pd.read_csv(io.BytesIO(content), sep=sep, encoding=encoding)
             df.columns = df.columns.str.strip()
             return df
@@ -98,9 +99,10 @@ if not all([uploaded_file_mapa, uploaded_file_enso, uploaded_file_precip, upload
     st.info("Por favor, suba los 4 archivos requeridos para habilitar la aplicación.")
     st.stop()
 
-df_precip_anual = load_data(uploaded_file_mapa)
-df_enso = load_data(uploaded_file_enso)
-df_precip_mensual = load_data(uploaded_file_precip)
+# --- CAMBIO IMPORTANTE: Usar punto y coma como separador para los archivos CSV ---
+df_precip_anual = load_data(uploaded_file_mapa, sep=';')
+df_enso = load_data(uploaded_file_enso, sep=';')
+df_precip_mensual = load_data(uploaded_file_precip, sep=';')
 gdf_municipios = load_shapefile(uploaded_zip_shapefile)
 
 if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_municipios]):
@@ -130,8 +132,12 @@ if month_col_name_enso is None:
 df_enso.dropna(subset=[year_col_name_enso, month_col_name_enso], inplace=True)
 for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
     if col in df_enso.columns:
-        df_enso[col] = df_enso[col].astype(str).str.replace(',', '.', regex=True).astype(float)
+        df_enso[col] = df_enso[col].astype(str).str.replace(',', '.', regex=True)
+        df_enso[col] = pd.to_numeric(df_enso[col], errors='coerce')
 
+df_enso[year_col_name_enso] = pd.to_numeric(df_enso[year_col_name_enso], errors='coerce')
+df_enso[month_col_name_enso] = pd.to_numeric(df_enso[month_col_name_enso], errors='coerce')
+df_enso.dropna(subset=[year_col_name_enso, month_col_name_enso], inplace=True)
 df_enso[year_col_name_enso] = df_enso[year_col_name_enso].astype(int)
 df_enso[month_col_name_enso] = df_enso[month_col_name_enso].astype(int)
 
@@ -146,7 +152,6 @@ df_enso = df_enso[datetime_series.notna()]
 df_enso['fecha_merge'] = datetime_series.dropna().dt.strftime('%Y-%m')
 
 # Precipitación anual (mapa)
-# --- INICIO: LÓGICA ROBUSTA PARA ENCONTRAR COLUMNAS DE COORDENADAS ---
 lon_col_name = None
 for col in df_precip_anual.columns:
     if 'longitud' in col.lower() or 'lon' in col.lower():
@@ -164,16 +169,18 @@ for col in df_precip_anual.columns:
 if lat_col_name is None:
     st.error(f"Error Crítico: No se encontró una columna para Latitud en el archivo de estaciones (mapaCVENSO.csv). Columnas encontradas: {list(df_precip_anual.columns)}")
     st.stop()
-# --- FIN: LÓGICA ROBUSTA ---
 
 for col in [lon_col_name, lat_col_name]:
-    df_precip_anual[col] = df_precip_anual[col].astype(str).str.replace(',', '.', regex=True).astype(float)
+    df_precip_anual[col] = df_precip_anual[col].astype(str).str.replace(',', '.', regex=True)
+    df_precip_anual[col] = pd.to_numeric(df_precip_anual[col], errors='coerce')
+df_precip_anual.dropna(subset=[lon_col_name, lat_col_name], inplace=True)
+
 
 gdf_stations = gpd.GeoDataFrame(
     df_precip_anual,
-    geometry=gpd.points_from_xy(df_precip_anual[lon_col_name], df_precip_anual[lat_col_name]), # Usa los nombres de columna encontrados
-    crs="EPSG:9377" # Define el sistema de coordenadas planas de origen
-).to_crs("EPSG:4326") # Transforma a coordenadas geográficas (WGS84)
+    geometry=gpd.points_from_xy(df_precip_anual[lon_col_name], df_precip_anual[lat_col_name]),
+    crs="EPSG:9377"
+).to_crs("EPSG:4326")
 gdf_stations['Longitud_geo'] = gdf_stations.geometry.x
 gdf_stations['Latitud_geo'] = gdf_stations.geometry.y
 
