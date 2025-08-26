@@ -106,21 +106,28 @@ gdf_municipios = load_shapefile(uploaded_zip_shapefile)
 if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_municipios]):
     st.stop()
 
-#--- LÍNEA DE DEPURACIÓN ---
-# Esta línea te mostrará los nombres exactos de las columnas del archivo ENSO.
-if df_enso is not None:
-    st.write("Nombres exactos de las columnas en el archivo ENSO:", df_enso.columns)
+#--- Preprocesamiento de datos ---
 
-#--- Preprocesamiento de datos
 # ENSO
-df_enso.columns = [col.strip() for col in df_enso.columns]
+# --- INICIO: Lógica robusta para encontrar la columna del año ---
+year_col_name_enso = None
+for col in df_enso.columns:
+    if 'año' in col.lower() or 'year' in col.lower(): # Busca 'año' o 'year' sin importar mayúsculas/minúsculas
+        year_col_name_enso = col
+        break # Se detiene al encontrar la primera coincidencia
+
+if year_col_name_enso is None:
+    st.error(f"Error Crítico: No se encontró una columna para el año en el archivo ENSO. Columnas encontradas: {list(df_enso.columns)}. Por favor, asegúrese de que una columna contenga 'Año' o 'Year' en su nombre.")
+    st.stop()
+# --- FIN: Lógica robusta ---
+
 for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
     if col in df_enso.columns:
         df_enso[col] = df_enso[col].astype(str).str.replace(',', '.', regex=True).astype(float)
 meses_es_en = {'ene': 'Jan', 'feb': 'Feb', 'mar': 'Mar', 'abr': 'Apr', 'may': 'May', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Aug', 'sep': 'Sep', 'oct': 'Oct', 'nov': 'Nov', 'dic': 'Dec'}
-df_enso['Año'] = df_enso['Año'].astype(int)
+df_enso[year_col_name_enso] = df_enso[year_col_name_enso].astype(int) # Usa el nombre de columna encontrado
 df_enso['mes_en'] = df_enso['mes'].str.lower().map(meses_es_en)
-df_enso['fecha_merge'] = pd.to_datetime(df_enso['Año'].astype(str) + '-' + df_enso['mes_en'], format='%Y-%b').dt.strftime('%Y-%m')
+df_enso['fecha_merge'] = pd.to_datetime(df_enso[year_col_name_enso].astype(str) + '-' + df_enso['mes_en'], format='%Y-%b').dt.strftime('%Y-%m')
 
 # Precipitación anual (mapa)
 for col in ['Longitud', 'Latitud']:
@@ -136,7 +143,7 @@ gdf_stations['Latitud_geo'] = gdf_stations.geometry.y
 
 # Precipitación mensual
 df_precip_mensual.columns = df_precip_mensual.columns.str.strip().str.lower()
-df_precip_mensual.rename(columns={'ano': 'Año'}, inplace=True) # Cambiado a 'Año'
+df_precip_mensual.rename(columns={'ano': 'Año'}, inplace=True)
 station_cols = [col for col in df_precip_mensual.columns if col.isdigit()]
 if not station_cols:
     st.error("No se encontraron columnas de estación en el archivo de precipitación mensual.")
@@ -249,117 +256,4 @@ with tab2:
         if map_centering == "Automático":
             m = folium.Map(location=[gdf_filtered['Latitud_geo'].mean(), gdf_filtered['Longitud_geo'].mean()], zoom_start=6)
             bounds = gdf_filtered.total_bounds
-            m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-        else: # Predefinido
-            if 'map_view' not in st.session_state:
-                st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
-            
-            col1, col2 = st.columns(2)
-            if col1.button("Ver Colombia"):
-                st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
-            if col2.button("Ver Estaciones Seleccionadas"):
-                bounds = gdf_filtered.total_bounds
-                st.session_state.map_view = {"location": [(bounds[1]+bounds[3])/2, (bounds[0]+bounds[2])/2], "zoom": 8}
-            
-            m = folium.Map(location=st.session_state.map_view["location"], zoom_start=st.session_state.map_view["zoom"])
-
-        ScaleControl().add_to(m)
-        for _, row in gdf_filtered.iterrows():
-            folium.Marker(
-                location=[row['Latitud_geo'], row['Longitud_geo']],
-                tooltip=f"Estación: {row['Nom_Est']}<br>Municipio: {row['municipio']}",
-                icon=folium.Icon(color="blue", icon="cloud-rain", prefix='fa')
-            ).add_to(m)
-        folium_static(m, width=900, height=600)
-
-        st.markdown("---")
-        st.subheader("Mapa Animado de Precipitación Anual")
-        df_anim_map = df_anual_melted.merge(gdf_stations[['Nom_Est', 'Latitud_geo', 'Longitud_geo']], on='Nom_Est')
-        if not df_anim_map.empty:
-            fig_mapa_animado = px.scatter_geo(
-                df_anim_map,
-                lat='Latitud_geo', lon='Longitud_geo',
-                color='Precipitación', size='Precipitación',
-                hover_name='Nom_Est', animation_frame='Año',
-                projection='natural earth', title='Precipitación Anual de las Estaciones',
-                color_continuous_scale=px.colors.sequential.YlGnBu,
-            )
-            fig_mapa_animado.update_geos(fitbounds="locations", showcountries=True)
-            st.plotly_chart(fig_mapa_animado, use_container_width=True)
-        else:
-            st.warning("No hay datos para generar el mapa animado.")
-    else:
-        st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
-
-#--- Pestaña de Tablas ---
-with tab3:
-    st.header("Información Detallada de las Estaciones")
-    df_info_table = gdf_stations[gdf_stations['Nom_Est'].isin(filtered_stations)].copy()
-    
-    df_mean_precip = df_anual_melted.groupby('Nom_Est')['Precipitación'].mean().round(2).reset_index()
-    df_mean_precip.rename(columns={'Precipitación': 'Precipitación media anual (mm)'}, inplace=True)
-    
-    df_info_table = df_info_table.merge(df_mean_precip, on='Nom_Est', how='left')
-    
-    columns_to_show = ['Nom_Est', 'municipio', 'departamento', 'Longitud', 'Latitud', 'Precipitación media anual (mm)']
-    existing_columns = [col for col in columns_to_show if col in df_info_table.columns]
-    
-    if not df_info_table.empty:
-        st.dataframe(df_info_table[existing_columns])
-    else:
-        st.warning("No hay datos para las estaciones seleccionadas.")
-
-#--- Pestaña de Análisis ENSO ---
-with tab4:
-    st.header("Análisis de Precipitación y el Fenómeno ENSO")
-    df_analisis = df_long[df_long['Nom_Est'].isin(filtered_stations)].copy()
-    df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
-    df_analisis = pd.merge(df_analisis, df_enso[['fecha_merge', 'Anomalia_ONI', 'ENSO']], on='fecha_merge', how='left')
-    df_analisis.dropna(subset=['ENSO', 'Anomalia_ONI'], inplace=True)
-
-    if not df_analisis.empty:
-        st.subheader("Precipitación Media por Evento ENSO")
-        df_enso_group = df_analisis.groupby('ENSO')['Precipitation'].mean().reset_index()
-        fig_enso = px.bar(
-            df_enso_group, x='ENSO', y='Precipitation',
-            title='Precipitación Media por Evento ENSO',
-            labels={'ENSO': 'Evento ENSO', 'Precipitation': 'Precipitación Media Mensual (mm)'},
-            color='ENSO'
-        )
-        st.plotly_chart(fig_enso, use_container_width=True)
-
-        st.subheader("Correlación entre Anomalía ONI y Precipitación")
-        correlation = df_analisis['Anomalia_ONI'].corr(df_analisis['Precipitation'])
-        st.metric(label="Coeficiente de Correlación de Pearson", value=f"{correlation:.2f}")
-        st.info("""
-        **Interpretación:**
-        - Un valor cercano a 1 indica una correlación positiva fuerte.
-        - Un valor cercano a -1 indica una correlación negativa fuerte.
-        - Un valor cercano a 0 indica una correlación débil o nula.
-        """)
-    else:
-        st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
-
-#--- Pestaña de Descarga ---
-with tab5:
-    st.header("Opciones de Descarga")
-    
-    st.markdown("**1. Datos de Precipitación Anual**")
-    csv_anual = df_anual_melted.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        "Descargar datos anuales (CSV)", csv_anual, 'precipitacion_anual.csv', 'text/csv'
-    )
-    
-    st.markdown("**2. Datos de Precipitación Mensual**")
-    csv_mensual = df_monthly_filtered.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        "Descargar datos mensuales (CSV)", csv_mensual, 'precipitacion_mensual.csv', 'text/csv'
-    )
-    
-    st.markdown("---")
-    st.markdown("""
-    **3. Exportar Gráficos y Mapas**
-    - **Gráficos:** Pase el cursor sobre el gráfico y haga clic en los tres puntos (...) para ver las opciones de descarga como imagen (PNG).
-    - **Mapas (Folium):** Use la herramienta de captura de pantalla de su sistema operativo.
-    - **Página Completa (PDF):** Use la función de impresión de su navegador (Ctrl+P o Cmd+P) y seleccione "Guardar como PDF".
-    """)
+            m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds
