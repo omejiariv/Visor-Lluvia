@@ -7,5 +7,7 @@ plotly.express
 plotly.graph
 geopandas
 numpy
-re
 shapely
+plotly
+geopandas
+base64
