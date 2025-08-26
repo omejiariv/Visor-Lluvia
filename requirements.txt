@@ -1,0 +1,11 @@
+streamlit
+pandas
+altair
+folium
+streamlit_folium
+plotly.express
+plotly.graph
+geopandas
+numpy
+re
+shapely
