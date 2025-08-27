@@ -299,32 +299,50 @@ with tab_anim:
                             OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
                             z, ss = OK.execute('grid', grid_lon, grid_lat)
                             
-                            z_unmasked = z.filled(np.nan)
-                            
-                            fig_kriging = px.imshow(z_unmasked, x=grid_lon, y=grid_lat, origin='lower', labels=dict(color="PP (mm)"), color_continuous_scale=px.colors.sequential.YlGnBu,
-                                                    zmin=color_range[0], zmax=color_range[1])
-                            
-                            # --- INICIO: PRUEBA DE DIAGNÓSTICO ---
-                            # Se comenta temporalmente el bucle que dibuja los municipios para verificar si interfiere con el mapa de calor.
-                            # for _, row in gdf_municipios.iterrows():
-                            #     if row.geometry is not None:
-                            #         if row.geometry.geom_type == 'MultiPolygon':
-                            #             for poly in row.geometry.geoms:
-                            #                 x, y = poly.exterior.xy
-                            #                 fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
-                            #         elif row.geometry.geom_type == 'Polygon':
-                            #             x, y = row.geometry.exterior.xy
-                            #             fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
-                            # --- FIN: PRUEBA DE DIAGNÓSTICO ---
-                            
+                            # --- INICIO: LÓGICA DE GRAFICACIÓN ROBUSTA CON GRAPH_OBJECTS ---
+                            # 1. Crear la figura vacía
+                            fig_kriging = go.Figure()
+
+                            # 2. Añadir la capa base: el mapa de calor
+                            z_unmasked = z.filled(np.nan) # Convierte el resultado para que Plotly lo entienda
+                            fig_kriging.add_trace(go.Heatmap(
+                                z=z_unmasked,
+                                x=grid_lon,
+                                y=grid_lat,
+                                colorscale='YlGnBu',
+                                colorbar=dict(title='PP (mm)', tickformat='.0f'),
+                                zmin=color_range[0],
+                                zmax=color_range[1]
+                            ))
+
+                            # 3. Añadir la capa de las fronteras de los municipios
+                            for _, row in gdf_municipios.iterrows():
+                                if row.geometry is not None:
+                                    geom_type = row.geometry.geom_type
+                                    if geom_type == 'Polygon':
+                                        x, y = row.geometry.exterior.xy
+                                        fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+                                    elif geom_type == 'MultiPolygon':
+                                        for poly in row.geometry.geoms:
+                                            x, y = poly.exterior.xy
+                                            fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+
+                            # 4. Añadir la capa de las estaciones
                             data_year['hover_text'] = data_year.apply(lambda row: f"{row['Nom_Est']}<br>Precipitación: {row['Precipitación']:.0f} mm", axis=1)
-                            fig_kriging.add_scatter(x=lons, y=lats, mode='markers', marker=dict(color='red', size=5), name='Estaciones',
-                                                    hovertext=data_year['hover_text'], hoverinfo="text")
-                            
-                            fig_kriging.update_layout(coloraxis_colorbar=dict(tickformat='.0f'))
-                            
-                            st.subheader(f"Año: {year}")
+                            fig_kriging.add_trace(go.Scatter(
+                                x=lons, y=lats, mode='markers', marker=dict(color='red', size=5),
+                                hovertext=data_year['hover_text'], hoverinfo="text",
+                                name='Estaciones', showlegend=False
+                            ))
+
+                            # 5. Configurar el layout final
+                            fig_kriging.update_layout(
+                                title_text=f"Año: {year}",
+                                xaxis_title="Longitud",
+                                yaxis_title="Latitud"
+                            )
                             st.plotly_chart(fig_kriging, use_container_width=True)
+                            # --- FIN: LÓGICA DE GRAFICACIÓN ROBUSTA ---
         else:
             st.warning("No hay años disponibles en la selección actual para la interpolación.")
 
@@ -336,7 +354,6 @@ with tab3: # Tabla de Estaciones
     st.dataframe(df_info_table[df_info_table['Nom_Est'].isin(selected_stations)])
 
 with tab4:
-    # ... (código sin cambios)
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
     df_analisis = df_monthly_filtered.copy()
     df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
@@ -358,7 +375,6 @@ with tab4:
     else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
 
 with tab5:
-    # ... (código sin cambios)
     st.header("Opciones de Descarga")
     sub_tab_orig, sub_tab_comp = st.tabs(["Descargar Datos Filtrados", "Descargar Series Completadas"])
     with sub_tab_orig:
