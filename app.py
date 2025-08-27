@@ -115,6 +115,7 @@ gdf_municipios = load_shapefile(uploaded_zip_shapefile)
 if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_municipios]):
     st.stop()
     
+# ... (Todo el preprocesamiento robusto se mantiene igual)
 # ENSO
 year_col_enso = next((col for col in df_enso.columns if 'año' in col.lower() or 'year' in col.lower()), None)
 month_col_enso = next((col for col in df_enso.columns if 'mes' in col.lower()), None)
@@ -298,58 +299,34 @@ with tab_anim:
                             grid_lat = np.linspace(gdf_municipios.total_bounds[1], gdf_municipios.total_bounds[3], 100)
                             OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
                             z, ss = OK.execute('grid', grid_lon, grid_lat)
-                            
-                            # --- INICIO: SOLUCIÓN DEFINITIVA CON go.Contour Y ESCALA DE EJES ---
-                            fig_kriging = go.Figure()
-
-                            # 1. Añadir la capa base usando Contour para forzar el renderizado
                             z_unmasked = z.filled(np.nan)
-                            fig_kriging.add_trace(go.Contour(
-                                z=z_unmasked,
-                                x=grid_lon,
-                                y=grid_lat,
-                                colorscale='YlGnBu',
-                                colorbar=dict(title='PP (mm)', tickformat='.0f'),
-                                zmin=color_range[0],
-                                zmax=color_range[1],
-                                contours_coloring='heatmap', # Se ve como un mapa de calor
-                                line_width=0 # Sin líneas de contorno
-                            ))
-
-                            # 2. Añadir las fronteras de los municipios
-                            for _, row in gdf_municipios.iterrows():
-                                if row.geometry is not None:
-                                    geom_type = row.geometry.geom_type
-                                    if geom_type == 'Polygon':
-                                        x, y = row.geometry.exterior.xy
-                                        fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
-                                    elif geom_type == 'MultiPolygon':
-                                        for poly in row.geometry.geoms:
-                                            x, y = poly.exterior.xy
-                                            fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
-
-                            # 3. Añadir las estaciones
-                            data_year['hover_text'] = data_year.apply(lambda row: f"{row['Nom_Est']}<br>Precipitación: {row['Precipitación']:.0f} mm", axis=1)
-                            fig_kriging.add_trace(go.Scatter(
-                                x=lons, y=lats, mode='markers', marker=dict(color='red', size=5),
-                                hovertext=data_year['hover_text'], hoverinfo="text",
-                                name='Estaciones', showlegend=False
-                            ))
-
-                            # 4. Configurar layout y la escala de los ejes para evitar distorsión
-                            fig_kriging.update_layout(
-                                title_text=f"Año: {year}",
-                                xaxis_title="Longitud",
-                                yaxis_title="Latitud"
-                            )
-                            fig_kriging.update_yaxes(scaleanchor="x", scaleratio=1)
                             
+                            # --- INICIO: PRUEBA DEFINITIVA - SÓLO MAPA DE CALOR ---
+                            # Se usa px.imshow que es más simple y se desactivan todas las otras capas para aislar el problema.
+                            fig_kriging = px.imshow(
+                                z_unmasked, 
+                                x=grid_lon, 
+                                y=grid_lat, 
+                                origin='lower',
+                                labels=dict(color="PP (mm)"),
+                                color_continuous_scale=px.colors.sequential.YlGnBu,
+                                zmin=color_range[0],
+                                zmax=color_range[1]
+                            )
+                            
+                            fig_kriging.update_layout(
+                                coloraxis_colorbar=dict(tickformat='.0f'),
+                                title_text=f"Año: {year}"
+                            )
+                            
+                            st.subheader(f"Año: {year}")
                             st.plotly_chart(fig_kriging, use_container_width=True)
-                            # --- FIN: SOLUCIÓN DEFINITIVA ---
+                            # --- FIN: PRUEBA DEFINITIVA ---
         else:
             st.warning("No hay años disponibles en la selección actual para la interpolación.")
 
 with tab3: # Tabla de Estaciones
+    # ... (código sin cambios)
     st.header("Información Detallada de las Estaciones")
     df_mean_precip = df_anual_melted.groupby('Nom_Est')['Precipitación'].mean().round(2).reset_index()
     df_mean_precip.rename(columns={'Precipitación': 'Precipitación media anual (mm)'}, inplace=True)
