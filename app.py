@@ -267,28 +267,38 @@ with tab_anim:
 
     with anim_kriging_tab:
         st.subheader("Comparación de Mapas de Calor con Interpolación Kriging")
-        st.info("Seleccione dos años para comparar. El cálculo puede ser lento.")
+        
         available_years = sorted(df_anual_melted['Año'].astype(int).unique())
         if available_years:
+            # --- INICIO: MEJORA DE ESCALA GRADUABLE ---
+            st.sidebar.markdown("### Opciones de Mapa Kriging")
+            min_precip = int(df_anual_melted['Precipitación'].min())
+            max_precip = int(df_anual_melted['Precipitación'].max())
+            color_range = st.sidebar.slider(
+                "Rango de la Escala de Color (mm)",
+                min_value=min_precip,
+                max_value=max_precip,
+                value=(min_precip, max_precip)
+            )
+            # --- FIN: MEJORA DE ESCALA GRADUABLE ---
+
             col1, col2 = st.columns(2)
             with col1:
-                kriging_year_1 = st.slider("Seleccione el año para el Mapa 1", min_value=min(available_years), max_value=max(available_years), value=max(available_years), key='slider1')
+                kriging_year_1 = st.slider("Seleccione el año para el Mapa 1", min(available_years), max(available_years), max(available_years), key='slider1')
             with col2:
-                kriging_year_2 = st.slider("Seleccione el año para el Mapa 2", min_value=min(available_years), max_value=max(available_years), value=max(available_years) - 1 if len(available_years) > 1 else max(available_years), key='slider2')
+                kriging_year_2 = st.slider("Seleccione el año para el Mapa 2", min(available_years), max(available_years), max(available_years) - 1 if len(available_years) > 1 else max(available_years), key='slider2')
 
             if st.button("Generar Mapas de Comparación", key='kriging_button'):
                 for i, (col, year) in enumerate(zip([col1, col2], [kriging_year_1, kriging_year_2])):
                     with col:
-                        data_year = df_anual_melted[df_anual_melted['Año'].astype(int) == year]
+                        data_year = df_anual_melted[df_anual_melted['Año'].astype(int) == year].copy()
                         if len(data_year) < 3:
                             st.error(f"Se necesitan al menos 3 estaciones para el Mapa {i+1}.")
                             continue
                         
-                        # --- INICIO: VERIFICACIÓN DE VARIANZA EN LOS DATOS ---
                         if data_year['Precipitación'].nunique() < 2:
-                            st.warning(f"La interpolación para el año {year} no es posible porque todos los valores de precipitación son idénticos. Por favor, revise sus datos.")
+                            st.warning(f"La interpolación para {year} no es posible porque todos los valores son idénticos. Revise sus datos.")
                             continue
-                        # --- FIN: VERIFICACIÓN ---
 
                         with st.spinner(f"Generando Mapa {i+1} ({year})..."):
                             lons, lats, vals = data_year['Longitud_geo'].values, data_year['Latitud_geo'].values, data_year['Precipitación'].values
@@ -297,23 +307,26 @@ with tab_anim:
                             OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
                             z, ss = OK.execute('grid', grid_lon, grid_lat)
                             
-                            fig_kriging = px.imshow(z, x=grid_lon, y=grid_lat, origin='lower', labels=dict(color="PP (mm)"), color_continuous_scale=px.colors.sequential.YlGnBu)
+                            fig_kriging = px.imshow(z, x=grid_lon, y=grid_lat, origin='lower', labels=dict(color="PP (mm)"), color_continuous_scale=px.colors.sequential.YlGnBu,
+                                                    zmin=color_range[0], zmax=color_range[1]) # Escala unificada
                             
                             for _, row in gdf_municipios.iterrows():
                                 if row.geometry is not None:
                                     if row.geometry.geom_type == 'MultiPolygon':
                                         for poly in row.geometry.geoms:
                                             x, y = poly.exterior.xy
-                                            fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False))
+                                            fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
                                     elif row.geometry.geom_type == 'Polygon':
                                         x, y = row.geometry.exterior.xy
-                                        fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False))
+                                        fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
                             
-                            fig_kriging.add_scatter(x=lons, y=lats, mode='markers', text=data_year['Nom_Est'], marker=dict(color='red', size=5), name='Estaciones', showlegend=False)
+                            # --- INICIO: MEJORA DE MENSAJES EMERGENTES ---
+                            data_year['hover_text'] = data_year.apply(lambda row: f"{row['Nom_Est']}<br>Precipitación: {row['Precipitación']:.0f} mm", axis=1)
+                            fig_kriging.add_scatter(x=lons, y=lats, mode='markers', marker=dict(color='red', size=5), name='Estaciones',
+                                                    hovertext=data_year['hover_text'], hoverinfo="text")
+                            # --- FIN: MEJORA DE MENSAJES EMERGENTES ---
                             
-                            # --- INICIO: FORMATEO DE ESCALA DE COLOR ---
                             fig_kriging.update_layout(coloraxis_colorbar=dict(tickformat='.0f'))
-                            # --- FIN: FORMATEO ---
                             
                             st.subheader(f"Año: {year}")
                             st.plotly_chart(fig_kriging, use_container_width=True)
@@ -321,6 +334,7 @@ with tab_anim:
             st.warning("No hay años disponibles en la selección actual para la interpolación.")
 
 with tab3: # Tabla de Estaciones
+    # ... (código sin cambios)
     st.header("Información Detallada de las Estaciones")
     df_mean_precip = df_anual_melted.groupby('Nom_Est')['Precipitación'].mean().round(2).reset_index()
     df_mean_precip.rename(columns={'Precipitación': 'Precipitación media anual (mm)'}, inplace=True)
