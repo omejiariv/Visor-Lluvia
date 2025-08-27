@@ -7,3 +7,5 @@ plotly
 geopandas
 numpy
 shapely
+scikit-learn
+pykrige
