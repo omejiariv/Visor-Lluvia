@@ -299,22 +299,23 @@ with tab_anim:
                             OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
                             z, ss = OK.execute('grid', grid_lon, grid_lat)
                             
-                            # --- INICIO: SOLUCIÓN PARA SUPERFICIE FALTANTE ---
                             z_unmasked = z.filled(np.nan)
-                            # --- FIN: SOLUCIÓN ---
                             
                             fig_kriging = px.imshow(z_unmasked, x=grid_lon, y=grid_lat, origin='lower', labels=dict(color="PP (mm)"), color_continuous_scale=px.colors.sequential.YlGnBu,
                                                     zmin=color_range[0], zmax=color_range[1])
                             
-                            for _, row in gdf_municipios.iterrows():
-                                if row.geometry is not None:
-                                    if row.geometry.geom_type == 'MultiPolygon':
-                                        for poly in row.geometry.geoms:
-                                            x, y = poly.exterior.xy
-                                            fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
-                                    elif row.geometry.geom_type == 'Polygon':
-                                        x, y = row.geometry.exterior.xy
-                                        fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+                            # --- INICIO: PRUEBA DE DIAGNÓSTICO ---
+                            # Se comenta temporalmente el bucle que dibuja los municipios para verificar si interfiere con el mapa de calor.
+                            # for _, row in gdf_municipios.iterrows():
+                            #     if row.geometry is not None:
+                            #         if row.geometry.geom_type == 'MultiPolygon':
+                            #             for poly in row.geometry.geoms:
+                            #                 x, y = poly.exterior.xy
+                            #                 fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+                            #         elif row.geometry.geom_type == 'Polygon':
+                            #             x, y = row.geometry.exterior.xy
+                            #             fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+                            # --- FIN: PRUEBA DE DIAGNÓSTICO ---
                             
                             data_year['hover_text'] = data_year.apply(lambda row: f"{row['Nom_Est']}<br>Precipitación: {row['Precipitación']:.0f} mm", axis=1)
                             fig_kriging.add_scatter(x=lons, y=lats, mode='markers', marker=dict(color='red', size=5), name='Estaciones',
@@ -335,6 +336,7 @@ with tab3: # Tabla de Estaciones
     st.dataframe(df_info_table[df_info_table['Nom_Est'].isin(selected_stations)])
 
 with tab4:
+    # ... (código sin cambios)
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
     df_analisis = df_monthly_filtered.copy()
     df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
@@ -356,6 +358,7 @@ with tab4:
     else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
 
 with tab5:
+    # ... (código sin cambios)
     st.header("Opciones de Descarga")
     sub_tab_orig, sub_tab_comp = st.tabs(["Descargar Datos Filtrados", "Descargar Series Completadas"])
     with sub_tab_orig:
