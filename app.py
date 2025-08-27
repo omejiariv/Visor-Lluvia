@@ -299,23 +299,24 @@ with tab_anim:
                             OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
                             z, ss = OK.execute('grid', grid_lon, grid_lat)
                             
-                            # --- INICIO: LÓGICA DE GRAFICACIÓN ROBUSTA CON GRAPH_OBJECTS ---
-                            # 1. Crear la figura vacía
+                            # --- INICIO: SOLUCIÓN DEFINITIVA CON go.Contour Y ESCALA DE EJES ---
                             fig_kriging = go.Figure()
 
-                            # 2. Añadir la capa base: el mapa de calor
-                            z_unmasked = z.filled(np.nan) # Convierte el resultado para que Plotly lo entienda
-                            fig_kriging.add_trace(go.Heatmap(
+                            # 1. Añadir la capa base usando Contour para forzar el renderizado
+                            z_unmasked = z.filled(np.nan)
+                            fig_kriging.add_trace(go.Contour(
                                 z=z_unmasked,
                                 x=grid_lon,
                                 y=grid_lat,
                                 colorscale='YlGnBu',
                                 colorbar=dict(title='PP (mm)', tickformat='.0f'),
                                 zmin=color_range[0],
-                                zmax=color_range[1]
+                                zmax=color_range[1],
+                                contours_coloring='heatmap', # Se ve como un mapa de calor
+                                line_width=0 # Sin líneas de contorno
                             ))
 
-                            # 3. Añadir la capa de las fronteras de los municipios
+                            # 2. Añadir las fronteras de los municipios
                             for _, row in gdf_municipios.iterrows():
                                 if row.geometry is not None:
                                     geom_type = row.geometry.geom_type
@@ -327,7 +328,7 @@ with tab_anim:
                                             x, y = poly.exterior.xy
                                             fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
 
-                            # 4. Añadir la capa de las estaciones
+                            # 3. Añadir las estaciones
                             data_year['hover_text'] = data_year.apply(lambda row: f"{row['Nom_Est']}<br>Precipitación: {row['Precipitación']:.0f} mm", axis=1)
                             fig_kriging.add_trace(go.Scatter(
                                 x=lons, y=lats, mode='markers', marker=dict(color='red', size=5),
@@ -335,14 +336,16 @@ with tab_anim:
                                 name='Estaciones', showlegend=False
                             ))
 
-                            # 5. Configurar el layout final
+                            # 4. Configurar layout y la escala de los ejes para evitar distorsión
                             fig_kriging.update_layout(
                                 title_text=f"Año: {year}",
                                 xaxis_title="Longitud",
                                 yaxis_title="Latitud"
                             )
+                            fig_kriging.update_yaxes(scaleanchor="x", scaleratio=1)
+                            
                             st.plotly_chart(fig_kriging, use_container_width=True)
-                            # --- FIN: LÓGICA DE GRAFICACIÓN ROBUSTA ---
+                            # --- FIN: SOLUCIÓN DEFINITIVA ---
         else:
             st.warning("No hay años disponibles en la selección actual para la interpolación.")
 
@@ -354,6 +357,7 @@ with tab3: # Tabla de Estaciones
     st.dataframe(df_info_table[df_info_table['Nom_Est'].isin(selected_stations)])
 
 with tab4:
+    # ... (código sin cambios)
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
     df_analisis = df_monthly_filtered.copy()
     df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
@@ -375,6 +379,7 @@ with tab4:
     else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
 
 with tab5:
+    # ... (código sin cambios)
     st.header("Opciones de Descarga")
     sub_tab_orig, sub_tab_comp = st.tabs(["Descargar Datos Filtrados", "Descargar Series Completadas"])
     with sub_tab_orig:
