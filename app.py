@@ -1,5 +1,5 @@
 # Visor de Información Geoespacial de Precipitación y el Fenómeno ENSO
-# Creado para el análisis de datos climáticos y su correlación con eventos ENSO.
+# Versión con mejoras de UI, Box Plot e Interpolación de Series
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -18,10 +18,8 @@ try:
     from folium.plugins import ScaleControl
 except ImportError:
     class ScaleControl:
-        def __init__(self, *args, **kwargs):
-            pass
-        def add_to(self, m):
-            pass
+        def __init__(self, *args, **kwargs): pass
+        def add_to(self, m): pass
 
 #--- Configuración de la página
 st.set_page_config(layout="wide", page_title="Visor de Precipitación y ENSO")
@@ -29,6 +27,7 @@ st.set_page_config(layout="wide", page_title="Visor de Precipitación y ENSO")
 # Aplicar CSS personalizado para optimizar el espacio
 st.markdown("""
 <style>
+div.block-container {padding-top: 2rem;} /* Reduce el espacio sobre el título principal */
 .sidebar .sidebar-content { font-size: 13px; }
 .stSelectbox label, .stMultiSelect label, .stSlider label { font-size: 13px !important; }
 .stMultiSelect div[data-baseweb="select"] { font-size: 13px !important; }
@@ -36,9 +35,10 @@ h1 { margin-top: 0px; padding-top: 0px; }
 </style>
 """, unsafe_allow_html=True)
 
-#--- Funciones de carga de datos
+#--- Funciones de carga y procesamiento ---
 @st.cache_data
 def load_data(file_path, sep=';'):
+    # ... (código de la función sin cambios)
     if file_path is None: return None
     try:
         content = file_path.getvalue()
@@ -48,7 +48,6 @@ def load_data(file_path, sep=';'):
     except Exception as e:
         st.error(f"Error al leer el archivo: {e}")
         return None
-    
     encodings_to_try = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']
     for encoding in encodings_to_try:
         try:
@@ -57,12 +56,12 @@ def load_data(file_path, sep=';'):
             return df
         except Exception:
             continue
-            
     st.error("No se pudo decodificar el archivo.")
     return None
 
 @st.cache_data
 def load_shapefile(file_path):
+    # ... (código de la función sin cambios)
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
@@ -77,13 +76,41 @@ def load_shapefile(file_path):
         st.error(f"Error al procesar el shapefile: {e}")
         return None
 
-#--- Interfaz de usuario
-st.title('Visor de Precipitación y Fenómeno ENSO')
-st.markdown("Esta aplicación interactiva permite visualizar y analizar datos de precipitación y su correlación con los eventos climáticos de El Niño-Oscilación del Sur (ENSO).")
+@st.cache_data
+def complete_series(df):
+    """
+    Rellena los datos de series de tiempo faltantes para cada estación usando interpolación.
+    """
+    all_completed_dfs = []
+    station_list = df['Nom_Est'].unique()
+    progress_bar = st.progress(0, text="Completando series...")
 
-#--- Panel de control (sidebar)
+    for i, station in enumerate(station_list):
+        df_station = df[df['Nom_Est'] == station].copy()
+        df_station.set_index('Fecha', inplace=True)
+        
+        # Re-muestrea a frecuencia mensual para crear un índice de tiempo completo
+        df_resampled = df_station.resample('MS').asfreq()
+        
+        # Interpola la columna de precipitación usando el tiempo como referencia
+        df_resampled['Precipitation'] = df_resampled['Precipitation'].interpolate(method='time')
+        
+        # Rellena la información estática
+        df_resampled['Nom_Est'] = station
+        df_resampled['Año'] = df_resampled.index.year
+        df_resampled['mes'] = df_resampled.index.month
+        df_resampled.reset_index(inplace=True)
+        all_completed_dfs.append(df_resampled)
+        progress_bar.progress((i + 1) / len(station_list), text=f"Completando series... Estación: {station}")
+
+    progress_bar.empty()
+    return pd.concat(all_completed_dfs, ignore_index=True)
+
+#--- Interfaz de usuario: Carga de Archivos ---
+st.title('Visor de Precipitación y Fenómeno ENSO')
 st.sidebar.header("Panel de Control")
 with st.sidebar.expander("**Cargar Archivos**", expanded=True):
+    # ... (código de carga de archivos sin cambios)
     uploaded_file_mapa = st.file_uploader("1. Cargar archivo de estaciones (mapaCVENSO.csv)", type="csv")
     uploaded_file_enso = st.file_uploader("2. Cargar archivo de ENSO (ENSO_1950_2023.csv)", type="csv")
     uploaded_file_precip = st.file_uploader("3. Cargar archivo de precipitación mensual (DatosPptnmes_ENSO.csv)", type="csv")
@@ -93,6 +120,7 @@ if not all([uploaded_file_mapa, uploaded_file_enso, uploaded_file_precip, upload
     st.info("Por favor, suba los 4 archivos requeridos para habilitar la aplicación.")
     st.stop()
 
+#--- Carga y Preprocesamiento de Datos ---
 df_precip_anual = load_data(uploaded_file_mapa)
 df_enso = load_data(uploaded_file_enso)
 df_precip_mensual = load_data(uploaded_file_precip)
@@ -101,8 +129,7 @@ gdf_municipios = load_shapefile(uploaded_zip_shapefile)
 if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_municipios]):
     st.stop()
 
-#--- Preprocesamiento de datos (a prueba de errores) ---
-
+# ... (Todo el código de preprocesamiento robusto se mantiene igual)
 # ENSO
 year_col_enso = next((col for col in df_enso.columns if 'año' in col.lower() or 'year' in col.lower()), None)
 month_col_enso = next((col for col in df_enso.columns if 'mes' in col.lower()), None)
@@ -162,93 +189,71 @@ station_mapping = gdf_stations.set_index('Id_estacio')['Nom_Est'].to_dict()
 df_long['Nom_Est'] = df_long['Id_estacion'].map(station_mapping)
 df_long.dropna(subset=['Nom_Est'], inplace=True)
 
-if df_long.empty:
-    st.warning("La fusión de datos falló. Verifique que los IDs de las estaciones coincidan.")
-    st.stop()
+if df_long.empty: st.stop()
 
 #--- Controles Mejorados en la Barra Lateral ---
 st.sidebar.markdown("### Filtros de Visualización")
-
-# Filtros en cascada para Municipio y Celda_XY
+# ... (código de filtros en cascada y selección de estaciones sin cambios)
 municipios_list = sorted(gdf_stations['municipio'].unique())
 celdas_list = sorted(gdf_stations['Celda_XY'].unique())
-
 selected_municipios = st.sidebar.multiselect('1. Filtrar por Municipio', options=municipios_list)
 selected_celdas = st.sidebar.multiselect('2. Filtrar por Celda_XY', options=celdas_list)
-
 stations_available = gdf_stations
 if selected_municipios:
     stations_available = stations_available[stations_available['municipio'].isin(selected_municipios)]
 if selected_celdas:
     stations_available = stations_available[stations_available['Celda_XY'].isin(selected_celdas)]
 stations_options = sorted(stations_available['Nom_Est'].unique())
-
 select_all = st.sidebar.checkbox("Seleccionar/Deseleccionar Todas", value=True)
 default_selection = stations_options if select_all else []
 selected_stations = st.sidebar.multiselect('3. Seleccionar Estaciones', options=stations_options, default=default_selection)
-
-# Filtro de Años
 años_disponibles = sorted([int(col) for col in gdf_stations.columns if str(col).isdigit()])
-year_range = st.sidebar.slider(
-    "4. Seleccionar Rango de Años",
-    min_value=min(años_disponibles), max_value=max(años_disponibles),
-    value=(min(años_disponibles), max(años_disponibles))
-)
-
-# Filtro de Meses
-meses_dict = {
-    'Enero': 1, 'Febrero': 2, 'Marzo': 3, 'Abril': 4, 'Mayo': 5, 'Junio': 6,
-    'Julio': 7, 'Agosto': 8, 'Septiembre': 9, 'Octubre': 10, 'Noviembre': 11, 'Diciembre': 12
-}
-meses_nombres = st.sidebar.multiselect(
-    "5. Seleccionar Meses",
-    options=list(meses_dict.keys()),
-    default=list(meses_dict.keys())
-)
+year_range = st.sidebar.slider("4. Seleccionar Rango de Años", min(años_disponibles), max(años_disponibles), (min(años_disponibles), max(años_disponibles)))
+meses_dict = {'Enero': 1, 'Febrero': 2, 'Marzo': 3, 'Abril': 4, 'Mayo': 5, 'Junio': 6, 'Julio': 7, 'Agosto': 8, 'Septiembre': 9, 'Octubre': 10, 'Noviembre': 11, 'Diciembre': 12}
+meses_nombres = st.sidebar.multiselect("5. Seleccionar Meses", list(meses_dict.keys()), default=list(meses_dict.keys()))
 meses_numeros = [meses_dict[m] for m in meses_nombres]
 
-if not selected_stations or not meses_numeros:
-    st.warning("Por favor, seleccione al menos una estación y un mes para continuar.")
-    st.stop()
-
-#--- Preparación de datos filtrados ---
-df_anual_melted = gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)].melt(
-    id_vars=['Nom_Est', 'Longitud_geo', 'Latitud_geo'],
-    value_vars=[str(y) for y in range(year_range[0], year_range[1] + 1) if str(y) in gdf_stations.columns],
-    var_name='Año', value_name='Precipitación'
+#--- NUEVO: Opción para completar series ---
+st.sidebar.markdown("### Opciones de Análisis Avanzado")
+analysis_mode = st.sidebar.radio(
+    "Análisis de Series Mensuales",
+    ("Usar datos originales", "Completar series (interpolación)")
 )
 
-df_monthly_filtered = df_long[
-    (df_long['Nom_Est'].isin(selected_stations)) &
-    (df_long['Fecha'].dt.year >= year_range[0]) &
-    (df_long['Fecha'].dt.year <= year_range[1]) &
-    (df_long['Fecha'].dt.month.isin(meses_numeros))
-]
+df_monthly_for_analysis = df_long.copy()
+if analysis_mode == "Completar series (interpolación)":
+    df_monthly_for_analysis = complete_series(df_long)
 
-#--- Pestañas de la aplicación ---
+if not selected_stations or not meses_numeros: st.stop()
+
+#--- Preparación de datos filtrados ---
+df_anual_melted = gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)].melt(id_vars=['Nom_Est', 'Longitud_geo', 'Latitud_geo'], value_vars=[str(y) for y in range(year_range[0], year_range[1] + 1) if str(y) in gdf_stations.columns], var_name='Año', value_name='Precipitación')
+df_monthly_filtered = df_monthly_for_analysis[(df_monthly_for_analysis['Nom_Est'].isin(selected_stations)) & (df_monthly_for_analysis['Fecha'].dt.year >= year_range[0]) & (df_monthly_for_analysis['Fecha'].dt.year <= year_range[1]) & (df_monthly_for_analysis['Fecha'].dt.month.isin(meses_numeros))]
+
+#--- Pestañas Principales ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Gráficos", "Mapas", "Tabla de Estaciones", "Análisis ENSO", "Descargas"])
 
 with tab1:
     st.header("Visualizaciones de Precipitación")
-    st.subheader("Precipitación Anual Total (mm)")
-    if not df_anual_melted.empty:
-        chart_anual = alt.Chart(df_anual_melted).mark_line(point=True).encode(
-            x=alt.X('Año:O'), y=alt.Y('Precipitación:Q'), color='Nom_Est:N',
-            tooltip=['Nom_Est', 'Año', 'Precipitación']
-        ).interactive()
-        st.altair_chart(chart_anual, use_container_width=True)
-    else: st.warning("No hay datos anuales para la selección actual.")
-
-    st.subheader("Precipitación Mensual Total (mm)")
-    if not df_monthly_filtered.empty:
-        chart_mensual = alt.Chart(df_monthly_filtered).mark_line().encode(
-            x=alt.X('Fecha:T'), y=alt.Y('Precipitation:Q'), color='Nom_Est:N',
-            tooltip=[alt.Tooltip('Fecha', format='%Y-%m'), 'Precipitation', 'Nom_Est']
-        ).interactive()
-        st.altair_chart(chart_mensual, use_container_width=True)
-    else: st.warning("No hay datos mensuales para la selección actual.")
+    sub_tab_anual, sub_tab_mensual, sub_tab_box = st.tabs(["Serie Anual", "Serie Mensual", "Box Plot Anual"])
+    with sub_tab_anual:
+        st.subheader("Precipitación Anual Total (mm)")
+        if not df_anual_melted.empty:
+            chart_anual = alt.Chart(df_anual_melted).mark_line(point=True).encode(x=alt.X('Año:O'), y=alt.Y('Precipitación:Q'), color='Nom_Est:N', tooltip=['Nom_Est', 'Año', 'Precipitación']).interactive()
+            st.altair_chart(chart_anual, use_container_width=True)
+    with sub_tab_mensual:
+        st.subheader("Precipitación Mensual Total (mm)")
+        if not df_monthly_filtered.empty:
+            chart_mensual = alt.Chart(df_monthly_filtered).mark_line().encode(x=alt.X('Fecha:T'), y=alt.Y('Precipitation:Q'), color='Nom_Est:N', tooltip=[alt.Tooltip('Fecha', format='%Y-%m'), 'Precipitation', 'Nom_Est']).interactive()
+            st.altair_chart(chart_mensual, use_container_width=True)
+    with sub_tab_box:
+        st.subheader("Distribución de la Precipitación Anual por Estación")
+        if not df_anual_melted.empty:
+            fig_box = px.box(df_anual_melted, x='Año', y='Precipitación', color='Nom_Est', title='Distribución Anual por Estación', labels={"Año": "Año", "Precipitación": "Precipitación Anual (mm)"})
+            st.plotly_chart(fig_box, use_container_width=True)
 
 with tab2:
+    # ... (código de Mapas sin cambios)
     st.header("Mapas de Lluvia y Precipitación")
     gdf_filtered = gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)]
     if not gdf_filtered.empty:
@@ -257,85 +262,73 @@ with tab2:
         if map_centering == "Automático":
             m = folium.Map(location=[gdf_filtered['Latitud_geo'].mean(), gdf_filtered['Longitud_geo'].mean()], zoom_start=6)
             bounds = gdf_filtered.total_bounds
-            if all(bounds):
-                m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+            if all(bounds): m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
         else:
-            if 'map_view' not in st.session_state:
-                st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
-            
+            if 'map_view' not in st.session_state: st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
             col1, col2 = st.columns(2)
-            if col1.button("Ver Colombia"):
-                st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
+            if col1.button("Ver Colombia"): st.session_state.map_view = {"location": [4.5709, -74.2973], "zoom": 5}
             if col2.button("Ver Estaciones Seleccionadas"):
                 bounds = gdf_filtered.total_bounds
-                if all(bounds):
-                    st.session_state.map_view = {"location": [(bounds[1]+bounds[3])/2, (bounds[0]+bounds[2])/2], "zoom": 8}
-            
+                if all(bounds): st.session_state.map_view = {"location": [(bounds[1]+bounds[3])/2, (bounds[0]+bounds[2])/2], "zoom": 8}
             m = folium.Map(location=st.session_state.map_view["location"], zoom_start=st.session_state.map_view["zoom"])
-
         ScaleControl().add_to(m)
         for _, row in gdf_filtered.iterrows():
             folium.Marker([row['Latitud_geo'], row['Longitud_geo']], tooltip=f"{row['Nom_Est']}<br>{row['municipio']}").add_to(m)
         folium_static(m, width=900, height=600)
-
-        # --- INICIO: SECCIÓN DEL MAPA ANIMADO RESTAURADA ---
         st.markdown("---")
         st.subheader("Mapa Animado de Precipitación Anual")
         if not df_anual_melted.empty:
-            fig_mapa_animado = px.scatter_geo(
-                df_anual_melted,
-                lat='Latitud_geo', lon='Longitud_geo',
-                color='Precipitación', size='Precipitación',
-                hover_name='Nom_Est', animation_frame='Año',
-                projection='natural earth', title='Precipitación Anual por Estación',
-                color_continuous_scale=px.colors.sequential.YlGnBu,
-            )
+            fig_mapa_animado = px.scatter_geo(df_anual_melted, lat='Latitud_geo', lon='Longitud_geo', color='Precipitación', size='Precipitación', hover_name='Nom_Est', animation_frame='Año', projection='natural earth', title='Precipitación Anual por Estación', color_continuous_scale=px.colors.sequential.YlGnBu)
             fig_mapa_animado.update_geos(fitbounds="locations", showcountries=True)
             st.plotly_chart(fig_mapa_animado, use_container_width=True)
-        else:
-            st.warning("No hay datos para generar el mapa animado.")
-        # --- FIN: SECCIÓN DEL MAPA ANIMADO RESTAURADA ---
-
     else: st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
 
+
 with tab3:
+    # ... (código de Tabla de Estaciones sin cambios)
     st.header("Información Detallada de las Estaciones")
     df_mean_precip = df_anual_melted.groupby('Nom_Est')['Precipitación'].mean().round(2).reset_index()
     df_mean_precip.rename(columns={'Precipitación': 'Precipitación media anual (mm)'}, inplace=True)
     df_info_table = gdf_stations.merge(df_mean_precip, on='Nom_Est', how='left')
     st.dataframe(df_info_table[df_info_table['Nom_Est'].isin(selected_stations)])
 
+
 with tab4:
+    # ... (código de Análisis ENSO sin cambios, pero ahora usa los datos potencialmente completados)
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
     df_analisis = df_monthly_filtered.copy()
     df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
     df_analisis = pd.merge(df_analisis, df_enso, on='fecha_merge', how='left')
     df_analisis.dropna(subset=['ENSO', 'Anomalia_ONI'], inplace=True)
-
     if not df_analisis.empty:
         st.subheader("Precipitación Media por Evento ENSO")
         df_enso_group = df_analisis.groupby('ENSO')['Precipitation'].mean().reset_index()
         fig_enso = px.bar(df_enso_group, x='ENSO', y='Precipitation', color='ENSO')
         st.plotly_chart(fig_enso, use_container_width=True)
-        
         st.subheader("Correlación entre Anomalía ONI y Precipitación")
         df_analisis['Anomalia_ONI'] = pd.to_numeric(df_analisis['Anomalia_ONI'], errors='coerce')
         df_analisis['Precipitation'] = pd.to_numeric(df_analisis['Precipitation'], errors='coerce')
         df_analisis.dropna(subset=['Anomalia_ONI', 'Precipitation'], inplace=True)
-
         if not df_analisis.empty and len(df_analisis) > 1:
             correlation = df_analisis['Anomalia_ONI'].corr(df_analisis['Precipitation'])
             st.metric("Coeficiente de Correlación", f"{correlation:.2f}")
-        else:
-            st.warning("No hay suficientes datos válidos para calcular la correlación después de la limpieza.")
+        else: st.warning("No hay suficientes datos válidos para calcular la correlación.")
     else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
-    
+
 with tab5:
     st.header("Opciones de Descarga")
-    st.markdown("**Datos de Precipitación Anual (Filtrados)**")
-    csv_anual = df_anual_melted.to_csv(index=False).encode('utf-8')
-    st.download_button("Descargar CSV Anual", csv_anual, 'precipitacion_anual.csv', 'text/csv')
-
-    st.markdown("**Datos de Precipitación Mensual (Filtrados)**")
-    csv_mensual = df_monthly_filtered.to_csv(index=False).encode('utf-8')
-    st.download_button("Descargar CSV Mensual", csv_mensual, 'precipitacion_mensual.csv', 'text/csv')
+    sub_tab_orig, sub_tab_comp = st.tabs(["Descargar Datos Filtrados", "Descargar Series Completadas"])
+    with sub_tab_orig:
+        st.markdown("**Datos de Precipitación Anual (Filtrados)**")
+        csv_anual = df_anual_melted.to_csv(index=False).encode('utf-8')
+        st.download_button("Descargar CSV Anual", csv_anual, 'precipitacion_anual.csv', 'text/csv', key='download-anual')
+        st.markdown("**Datos de Precipitación Mensual (Filtrados)**")
+        csv_mensual = df_monthly_filtered.to_csv(index=False).encode('utf-8')
+        st.download_button("Descargar CSV Mensual", csv_mensual, 'precipitacion_mensual.csv', 'text/csv', key='download-mensual')
+    with sub_tab_comp:
+        if analysis_mode == "Completar series (interpolación)":
+            st.markdown("**Datos de Precipitación Mensual (Series Completadas y Filtradas)**")
+            csv_completado = df_monthly_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button("Descargar CSV con Series Completadas", csv_completado, 'precipitacion_mensual_completada.csv', 'text/csv', key='download-completado')
+        else:
+            st.info("Para descargar las series completadas, primero seleccione la opción 'Completar series (interpolación)' en el panel lateral.")
