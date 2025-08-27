@@ -74,37 +74,24 @@ def load_shapefile(file_path):
         st.error(f"Error al procesar el shapefile: {e}")
         return None
 
-# --- INICIO: FUNCIÓN FALTANTE RESTAURADA ---
 @st.cache_data
 def complete_series(df):
-    """
-    Rellena los datos de series de tiempo faltantes para cada estación usando interpolación.
-    """
     all_completed_dfs = []
     station_list = df['Nom_Est'].unique()
     progress_bar = st.progress(0, text="Completando series...")
-
     for i, station in enumerate(station_list):
         df_station = df[df['Nom_Est'] == station].copy()
         df_station.set_index('Fecha', inplace=True)
-        
-        # Re-muestrea a frecuencia mensual para crear un índice de tiempo completo
         df_resampled = df_station.resample('MS').asfreq()
-        
-        # Interpola la columna de precipitación usando el tiempo como referencia
         df_resampled['Precipitation'] = df_resampled['Precipitation'].interpolate(method='time')
-        
-        # Rellena la información estática
         df_resampled['Nom_Est'] = station
         df_resampled['Año'] = df_resampled.index.year
         df_resampled['mes'] = df_resampled.index.month
         df_resampled.reset_index(inplace=True)
         all_completed_dfs.append(df_resampled)
         progress_bar.progress((i + 1) / len(station_list), text=f"Completando series... Estación: {station}")
-
     progress_bar.empty()
     return pd.concat(all_completed_dfs, ignore_index=True)
-# --- FIN: FUNCIÓN FALTANTE RESTAURADA ---
 
 #--- Interfaz y Carga de Archivos ---
 st.title('Visor de Precipitación y Fenómeno ENSO')
@@ -124,11 +111,9 @@ df_precip_anual = load_data(uploaded_file_mapa)
 df_enso = load_data(uploaded_file_enso)
 df_precip_mensual = load_data(uploaded_file_precip)
 gdf_municipios = load_shapefile(uploaded_zip_shapefile)
-
 if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_municipios]):
     st.stop()
     
-# ... (Todo el preprocesamiento robusto se mantiene igual)
 # ENSO
 year_col_enso = next((col for col in df_enso.columns if 'año' in col.lower() or 'year' in col.lower()), None)
 month_col_enso = next((col for col in df_enso.columns if 'mes' in col.lower()), None)
@@ -156,11 +141,7 @@ if not all([lon_col, lat_col]):
 df_precip_anual[lon_col] = pd.to_numeric(df_precip_anual[lon_col].astype(str).str.replace(',', '.'), errors='coerce')
 df_precip_anual[lat_col] = pd.to_numeric(df_precip_anual[lat_col].astype(str).str.replace(',', '.'), errors='coerce')
 df_precip_anual.dropna(subset=[lon_col, lat_col], inplace=True)
-gdf_stations = gpd.GeoDataFrame(
-    df_precip_anual,
-    geometry=gpd.points_from_xy(df_precip_anual[lon_col], df_precip_anual[lat_col]),
-    crs="EPSG:9377"
-).to_crs("EPSG:4326")
+gdf_stations = gpd.GeoDataFrame(df_precip_anual, geometry=gpd.points_from_xy(df_precip_anual[lon_col], df_precip_anual[lat_col]), crs="EPSG:9377").to_crs("EPSG:4326")
 gdf_stations['Longitud_geo'] = gdf_stations.geometry.x
 gdf_stations['Latitud_geo'] = gdf_stations.geometry.y
 
@@ -187,7 +168,6 @@ df_long['Id_estacion'] = df_long['Id_estacion'].astype(str).str.strip()
 station_mapping = gdf_stations.set_index('Id_estacio')['Nom_Est'].to_dict()
 df_long['Nom_Est'] = df_long['Id_estacion'].map(station_mapping)
 df_long.dropna(subset=['Nom_Est'], inplace=True)
-
 if df_long.empty: st.stop()
 
 #--- Controles Mejorados en la Barra Lateral ---
@@ -212,10 +192,7 @@ meses_nombres = st.sidebar.multiselect("5. Seleccionar Meses", list(meses_dict.k
 meses_numeros = [meses_dict[m] for m in meses_nombres]
 
 st.sidebar.markdown("### Opciones de Análisis Avanzado")
-analysis_mode = st.sidebar.radio(
-    "Análisis de Series Mensuales",
-    ("Usar datos originales", "Completar series (interpolación)")
-)
+analysis_mode = st.sidebar.radio("Análisis de Series Mensuales", ("Usar datos originales", "Completar series (interpolación)"))
 
 df_monthly_for_analysis = df_long.copy()
 if analysis_mode == "Completar series (interpolación)":
@@ -254,6 +231,7 @@ with tab2: # Mapa Estático
     gdf_filtered = gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)]
     if not gdf_filtered.empty:
         map_centering = st.radio("Opciones de centrado", ("Automático", "Predefinido"), horizontal=True, key='map_radio')
+        # ... (código del mapa estático sin cambios)
         if map_centering == "Automático":
             m = folium.Map(location=[gdf_filtered['Latitud_geo'].mean(), gdf_filtered['Longitud_geo'].mean()], zoom_start=6)
             bounds = gdf_filtered.total_bounds
@@ -275,32 +253,44 @@ with tab2: # Mapa Estático
 with tab_anim:
     st.header("Mapas Animados y de Interpolación")
     anim_points_tab, anim_kriging_tab = st.tabs(["Animación de Puntos", "Interpolación Kriging (por Año)"])
-
     with anim_points_tab:
         st.subheader("Mapa Animado de Precipitación Anual (Puntos)")
         if not df_anual_melted.empty:
             fig_mapa_animado = px.scatter_geo(df_anual_melted, lat='Latitud_geo', lon='Longitud_geo', color='Precipitación', size='Precipitación', hover_name='Nom_Est', animation_frame='Año', projection='natural earth', title='Precipitación Anual por Estación', color_continuous_scale=px.colors.sequential.YlGnBu)
             fig_mapa_animado.update_geos(fitbounds="locations", showcountries=True)
             st.plotly_chart(fig_mapa_animado, use_container_width=True)
-        else: st.warning("No hay datos para generar el mapa animado de puntos.")
     with anim_kriging_tab:
         st.subheader("Mapa de Calor con Interpolación Kriging")
         st.info("Esta herramienta genera un mapa de calor (raster) de la precipitación para un año específico. El cálculo puede tardar un momento.")
-        kriging_year = st.selectbox("Seleccione el año para la interpolación", options=sorted(df_anual_melted['Año'].unique(), reverse=True))
-        if st.button("Generar Mapa Kriging", key='kriging_button'):
-            data_year = df_anual_melted[df_anual_melted['Año'] == kriging_year]
-            if len(data_year) < 3:
-                st.error("Se necesitan al menos 3 estaciones con datos para realizar la interpolación Kriging.")
-            else:
-                with st.spinner("Realizando interpolación Kriging..."):
-                    lons, lats, vals = data_year['Longitud_geo'].values, data_year['Latitud_geo'].values, data_year['Precipitación'].values
-                    grid_lon = np.linspace(lons.min(), lons.max(), 100)
-                    grid_lat = np.linspace(lats.min(), lats.max(), 100)
-                    OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
-                    z, ss = OK.execute('grid', grid_lon, grid_lat)
-                    fig_kriging = px.imshow(z, x=grid_lon, y=grid_lat, origin='lower', labels=dict(x="Longitud", y="Latitud", color="Precipitación (mm)"), title=f"Mapa de Precipitación Interpolada para {kriging_year}", color_continuous_scale=px.colors.sequential.YlGnBu)
-                    fig_kriging.add_scatter(x=lons, y=lats, mode='markers', text=data_year['Nom_Est'], marker=dict(color='red', size=5), name='Estaciones')
-                    st.plotly_chart(fig_kriging, use_container_width=True)
+        
+        # --- INICIO: CAMBIO DE SELECTBOX A SLIDER ---
+        available_years = sorted(df_anual_melted['Año'].astype(int).unique())
+        if available_years:
+            kriging_year = st.slider(
+                "Seleccione el año para la interpolación",
+                min_value=min(available_years),
+                max_value=max(available_years),
+                value=max(available_years) # Por defecto el año más reciente
+            )
+
+            if st.button("Generar Mapa Kriging", key='kriging_button'):
+                data_year = df_anual_melted[df_anual_melted['Año'].astype(int) == kriging_year]
+                if len(data_year) < 3:
+                    st.error("Se necesitan al menos 3 estaciones con datos para realizar la interpolación Kriging.")
+                else:
+                    with st.spinner("Realizando interpolación Kriging..."):
+                        lons, lats, vals = data_year['Longitud_geo'].values, data_year['Latitud_geo'].values, data_year['Precipitación'].values
+                        grid_lon = np.linspace(lons.min(), lons.max(), 100)
+                        grid_lat = np.linspace(lats.min(), lats.max(), 100)
+                        OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
+                        z, ss = OK.execute('grid', grid_lon, grid_lat)
+                        fig_kriging = px.imshow(z, x=grid_lon, y=grid_lat, origin='lower', labels=dict(x="Longitud", y="Latitud", color="Precipitación (mm)"), title=f"Mapa de Precipitación Interpolada para {kriging_year}", color_continuous_scale=px.colors.sequential.YlGnBu)
+                        fig_kriging.add_scatter(x=lons, y=lats, mode='markers', text=data_year['Nom_Est'], marker=dict(color='red', size=5), name='Estaciones')
+                        st.plotly_chart(fig_kriging, use_container_width=True)
+        else:
+            st.warning("No hay años disponibles en la selección actual para la interpolación.")
+        # --- FIN: CAMBIO DE SELECTBOX A SLIDER ---
+
 
 with tab3: # Tabla de Estaciones
     st.header("Información Detallada de las Estaciones")
