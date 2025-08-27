@@ -115,7 +115,6 @@ gdf_municipios = load_shapefile(uploaded_zip_shapefile)
 if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_municipios]):
     st.stop()
     
-# ... (Todo el preprocesamiento robusto se mantiene igual)
 # ENSO
 year_col_enso = next((col for col in df_enso.columns if 'año' in col.lower() or 'year' in col.lower()), None)
 month_col_enso = next((col for col in df_enso.columns if 'mes' in col.lower()), None)
@@ -127,9 +126,9 @@ df_enso[year_col_enso] = pd.to_numeric(df_enso[year_col_enso], errors='coerce')
 df_enso[month_col_enso] = pd.to_numeric(df_enso[month_col_enso], errors='coerce')
 df_enso.dropna(subset=[year_col_enso, month_col_enso], inplace=True)
 df_enso = df_enso.astype({year_col_enso: int, month_col_enso: int})
-date_strings_enso = df_enso[year_col_enso].astype(str) + '-' + df_enso[month_col_enso].astype(str)
-df_enso['fecha_merge'] = pd.to_datetime(date_strings_enso, errors='coerce').dt.strftime('%Y-%m')
-df_enso.dropna(subset=['fecha_merge'], inplace=True)
+df_enso['fecha_merge'] = pd.to_datetime(df_enso[year_col_enso].astype(str) + '-' + df_enso[month_col_enso].astype(str), errors='coerce').dt.strftime('%Y-%m')
+df_enso['Fecha'] = pd.to_datetime(df_enso['fecha_merge']) # Columna de fecha para graficar
+df_enso.dropna(subset=['fecha_merge', 'Fecha'], inplace=True)
 for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
     if col in df_enso.columns:
         df_enso[col] = pd.to_numeric(df_enso[col].astype(str).str.replace(',', '.'), errors='coerce')
@@ -207,7 +206,7 @@ df_anual_melted = gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)].
 df_monthly_filtered = df_monthly_for_analysis[(df_monthly_for_analysis['Nom_Est'].isin(selected_stations)) & (df_monthly_for_analysis['Fecha'].dt.year >= year_range[0]) & (df_monthly_for_analysis['Fecha'].dt.year <= year_range[1]) & (df_monthly_for_analysis['Fecha'].dt.month.isin(meses_numeros))]
 
 #--- Pestañas Principales ---
-tab1, tab2, tab_anim, tab3, tab4, tab5 = st.tabs(["Gráficos", "Mapa Estático", "Mapas Avanzados", "Tabla de Estaciones", "Análisis ENSO", "Descargas"])
+tab1, tab2, tab_anim, tab3, tab4, tab5 = st.tabs(["Gráficos", "Mapa de Estaciones", "Mapas Avanzados", "Tabla de Estaciones", "Análisis ENSO", "Descargas"])
 
 with tab1:
     # ... (código sin cambios)
@@ -257,11 +256,9 @@ with tab2: # Mapa Estático
 with tab_anim:
     st.header("Mapas Animados y de Interpolación")
     anim_points_tab, anim_kriging_tab = st.tabs(["Animación de Puntos", "Análisis Kriging"])
-
     with anim_points_tab:
+        # ... (código con mejoras de zoom)
         st.subheader("Mapa Animado de Precipitación Anual (Puntos)")
-        
-        # --- INICIO: MEJORA DE ZOOM PARA MAPA ANIMADO ---
         st.markdown("Controles de Zoom:")
         c1, c2, c3 = st.columns(3)
         if c1.button("Ajustar a Selección", key='zoom_select'):
@@ -272,7 +269,7 @@ with tab_anim:
             st.session_state.anim_map_view = 'colombia'
 
         if 'anim_map_view' not in st.session_state:
-            st.session_state.anim_map_view = 'fit' # Por defecto se ajusta a la selección
+            st.session_state.anim_map_view = 'fit'
         
         if not df_anual_melted.empty:
             fig_mapa_animado = px.scatter_geo(df_anual_melted, lat='Latitud_geo', lon='Longitud_geo', color='Precipitación', size='Precipitación', hover_name='Nom_Est', animation_frame='Año', projection='natural earth', title='Precipitación Anual por Estación', color_continuous_scale=px.colors.sequential.YlGnBu)
@@ -283,10 +280,8 @@ with tab_anim:
                 fig_mapa_animado.update_geos(center={"lat": 6.2442, "lon": -75.5812}, projection_scale=8, visible=True, resolution=50)
             elif st.session_state.anim_map_view == 'colombia':
                  fig_mapa_animado.update_geos(center={"lat": 4.5709, "lon": -74.2973}, projection_scale=5, visible=True, resolution=50)
-
             fig_mapa_animado.update_layout(height=700)
             st.plotly_chart(fig_mapa_animado, use_container_width=True)
-        # --- FIN: MEJORA ---
 
     with anim_kriging_tab:
         st.subheader("Comparación de Mapas de Precipitación y Varianza (Kriging)")
@@ -303,16 +298,43 @@ with tab_anim:
             with col2:
                 kriging_year_2 = st.slider("Seleccione Año 2", min(available_years), max(available_years), max(available_years) - 1 if len(available_years) > 1 else max(available_years), key='slider2')
 
+            # --- INICIO: LÓGICA MEJORADA PARA PRECIPITACIÓN Y VARIANZA ---
+            # Menú para seleccionar el contenido del mapa 2 si los años son iguales
+            map2_content = "Precipitación"
+            if kriging_year_1 == kriging_year_2:
+                map2_content = st.selectbox(
+                    "Contenido para el Mapa 2:",
+                    ("Varianza Kriging", "Precipitación")
+                )
+
             if st.button("Generar Mapas", key='kriging_button'):
-                # --- INICIO: LÓGICA MEJORADA PARA PRECIPITACIÓN Y VARIANZA ---
-                if kriging_year_1 == kriging_year_2:
-                    st.info(f"Mostrando Precipitación vs. Varianza de Interpolación para el año {kriging_year_1}")
-                    # Lógica para un solo año: Precipitación a la izquierda, Varianza a la derecha
+                # Lógica para años diferentes
+                if kriging_year_1 != kriging_year_2:
+                    st.info(f"Comparando Precipitación para los años {kriging_year_1} y {kriging_year_2}")
+                    for i, (col, year) in enumerate(zip([col1, col2], [kriging_year_1, kriging_year_2])):
+                        with col:
+                            # ... (código de graficación Kriging para dos años)
+                            data_year = df_anual_melted[df_anual_melted['Año'].astype(int) == year].copy()
+                            if len(data_year) < 3: st.error(f"Se necesitan al menos 3 estaciones para el Mapa {i+1}."); continue
+                            if data_year['Precipitación'].nunique() < 2: st.warning(f"La interpolación para {year} no es posible porque todos los valores son idénticos."); continue
+                            with st.spinner(f"Generando Mapa {i+1} ({year})..."):
+                                # ... (Cálculo Kriging)
+                                lons, lats, vals = data_year['Longitud_geo'].values, data_year['Latitud_geo'].values, data_year['Precipitación'].values
+                                grid_lon = np.linspace(gdf_municipios.total_bounds[0], gdf_municipios.total_bounds[2], 100)
+                                grid_lat = np.linspace(gdf_municipios.total_bounds[1], gdf_municipios.total_bounds[3], 100)
+                                OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
+                                z, ss = OK.execute('grid', grid_lon, grid_lat)
+                                fig = go.Figure(go.Heatmap(x=grid_lon, y=grid_lat, z=z.filled(np.nan), colorscale='YlGnBu', colorbar=dict(title='PP (mm)', tickformat='.0f'), zmin=color_range[0], zmax=color_range[1]))
+                                fig.update_layout(title_text=f"Año: {year}", xaxis_title="Longitud", yaxis_title="Latitud")
+                                fig.update_yaxes(scaleanchor="x", scaleratio=1)
+                                st.plotly_chart(fig, use_container_width=True)
+                
+                # Lógica para el mismo año
+                else:
                     data_year = df_anual_melted[df_anual_melted['Año'].astype(int) == kriging_year_1].copy()
                     if len(data_year) < 3:
                         st.error("Se necesitan al menos 3 estaciones con datos para realizar la interpolación.")
                     else:
-                        # ... (cálculo Kriging)
                         with st.spinner(f"Generando mapas para {kriging_year_1}..."):
                             lons, lats, vals = data_year['Longitud_geo'].values, data_year['Latitud_geo'].values, data_year['Precipitación'].values
                             grid_lon = np.linspace(gdf_municipios.total_bounds[0], gdf_municipios.total_bounds[2], 100)
@@ -321,38 +343,42 @@ with tab_anim:
                             z, ss = OK.execute('grid', grid_lon, grid_lat)
                             z_unmasked, ss_unmasked = z.filled(np.nan), ss.filled(np.nan)
 
-                            # Mapa de Precipitación
-                            fig1 = go.Figure(go.Heatmap(x=grid_lon, y=grid_lat, z=z_unmasked, colorscale='YlGnBu', colorbar=dict(title='PP (mm)'), zmin=color_range[0], zmax=color_range[1]))
-                            fig1.update_layout(title_text=f"Precipitación - {kriging_year_1}", xaxis_title="Longitud", yaxis_title="Latitud")
-                            fig1.update_yaxes(scaleanchor="x", scaleratio=1)
+                            # Dibuja el Mapa 1 (Precipitación)
+                            with col1:
+                                fig1 = go.Figure()
+                                fig1.add_trace(go.Heatmap(x=grid_lon, y=grid_lat, z=z_unmasked, colorscale='YlGnBu', colorbar=dict(title='PP (mm)', tickformat='.0f'), zmin=color_range[0], zmax=color_range[1]))
+                                fig1.update_layout(title_text=f"Precipitación - {kriging_year_1}")
+                                fig1.update_yaxes(scaleanchor="x", scaleratio=1)
+                                for _, row in gdf_municipios.iterrows(): # Añadir fronteras
+                                    if row.geometry is not None:
+                                        if row.geometry.geom_type == 'MultiPolygon':
+                                            for poly in row.geometry.geoms: x, y = poly.exterior.xy; fig1.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+                                        elif row.geometry.geom_type == 'Polygon': x, y = row.geometry.exterior.xy; fig1.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+                                data_year['hover_text'] = data_year.apply(lambda row: f"{row['Nom_Est']}<br>PP: {row['Precipitación']:.0f} mm", axis=1)
+                                fig1.add_trace(go.Scatter(x=lons, y=lats, mode='markers', marker=dict(color='red', size=5), hovertext=data_year['hover_text'], hoverinfo="text", name='Estaciones', showlegend=False))
+                                st.plotly_chart(fig1, use_container_width=True)
                             
-                            # Mapa de Varianza
-                            fig2 = go.Figure(go.Heatmap(x=grid_lon, y=grid_lat, z=ss_unmasked, colorscale='Viridis', colorbar=dict(title='Varianza')))
-                            fig2.update_layout(title_text=f"Varianza Kriging - {kriging_year_1}", xaxis_title="Longitud", yaxis_title="Latitud")
-                            fig2.update_yaxes(scaleanchor="x", scaleratio=1)
+                            # Dibuja el Mapa 2 (Precipitación o Varianza)
+                            with col2:
+                                if map2_content == "Precipitación":
+                                    fig2 = go.Figure()
+                                    fig2.add_trace(go.Heatmap(x=grid_lon, y=grid_lat, z=z_unmasked, colorscale='YlGnBu', colorbar=dict(title='PP (mm)', tickformat='.0f'), zmin=color_range[0], zmax=color_range[1]))
+                                    fig2.update_layout(title_text=f"Precipitación - {kriging_year_1}")
+                                else: # Varianza
+                                    fig2 = go.Figure()
+                                    fig2.add_trace(go.Heatmap(x=grid_lon, y=grid_lat, z=ss_unmasked, colorscale='Viridis', colorbar=dict(title='Varianza', tickformat='.2f')))
+                                    fig2.update_layout(title_text=f"Varianza Kriging - {kriging_year_1}")
+                                
+                                fig2.update_yaxes(scaleanchor="x", scaleratio=1)
+                                for _, row in gdf_municipios.iterrows(): # Añadir fronteras
+                                    if row.geometry is not None:
+                                        if row.geometry.geom_type == 'MultiPolygon':
+                                            for poly in row.geometry.geoms: x, y = poly.exterior.xy; fig2.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+                                        elif row.geometry.geom_type == 'Polygon': x, y = row.geometry.exterior.xy; fig2.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False, hoverinfo='none'))
+                                data_year['hover_text'] = data_year.apply(lambda row: f"{row['Nom_Est']}<br>PP: {row['Precipitación']:.0f} mm", axis=1)
+                                fig2.add_trace(go.Scatter(x=lons, y=lats, mode='markers', marker=dict(color='red', size=5), hovertext=data_year['hover_text'], hoverinfo="text", name='Estaciones', showlegend=False))
+                                st.plotly_chart(fig2, use_container_width=True)
 
-                            col1.plotly_chart(fig1, use_container_width=True)
-                            col2.plotly_chart(fig2, use_container_width=True)
-                else:
-                    # Lógica para dos años diferentes (la que ya teníamos)
-                    st.info(f"Comparando Precipitación para los años {kriging_year_1} y {kriging_year_2}")
-                    for i, (col, year) in enumerate(zip([col1, col2], [kriging_year_1, kriging_year_2])):
-                        with col:
-                            # ... (código de graficación Kriging para dos años, como en la versión anterior)
-                            data_year = df_anual_melted[df_anual_melted['Año'].astype(int) == year].copy()
-                            if len(data_year) < 3: st.error(f"Se necesitan al menos 3 estaciones para el Mapa {i+1}."); continue
-                            if data_year['Precipitación'].nunique() < 2: st.warning(f"La interpolación para {year} no es posible porque todos los valores son idénticos."); continue
-                            with st.spinner(f"Generando Mapa {i+1} ({year})..."):
-                                lons, lats, vals = data_year['Longitud_geo'].values, data_year['Latitud_geo'].values, data_year['Precipitación'].values
-                                grid_lon = np.linspace(gdf_municipios.total_bounds[0], gdf_municipios.total_bounds[2], 100)
-                                grid_lat = np.linspace(gdf_municipios.total_bounds[1], gdf_municipios.total_bounds[3], 100)
-                                OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
-                                z, ss = OK.execute('grid', grid_lon, grid_lat)
-                                fig_kriging = go.Figure(go.Heatmap(x=grid_lon, y=grid_lat, z=z.filled(np.nan), colorscale='YlGnBu', colorbar=dict(title='PP (mm)', tickformat='.0f'), zmin=color_range[0], zmax=color_range[1]))
-                                fig_kriging.update_layout(title_text=f"Año: {year}", xaxis_title="Longitud", yaxis_title="Latitud")
-                                fig_kriging.update_yaxes(scaleanchor="x", scaleratio=1)
-                                st.plotly_chart(fig_kriging, use_container_width=True)
-                # --- FIN: LÓGICA MEJORADA ---
         else:
             st.warning("No hay años disponibles en la selección actual para la interpolación.")
 
@@ -365,24 +391,53 @@ with tab3: # Tabla de Estaciones
 
 with tab4:
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
-    df_analisis = df_monthly_filtered.copy()
-    df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
-    df_analisis = pd.merge(df_analisis, df_enso, on='fecha_merge', how='left')
-    df_analisis.dropna(subset=['ENSO', 'Anomalia_ONI'], inplace=True)
-    if not df_analisis.empty:
-        st.subheader("Precipitación Media por Evento ENSO")
-        df_enso_group = df_analisis.groupby('ENSO')['Precipitation'].mean().reset_index()
-        fig_enso = px.bar(df_enso_group, x='ENSO', y='Precipitation', color='ENSO')
-        st.plotly_chart(fig_enso, use_container_width=True)
-        st.subheader("Correlación entre Anomalía ONI y Precipitación")
-        df_analisis['Anomalia_ONI'] = pd.to_numeric(df_analisis['Anomalia_ONI'], errors='coerce')
-        df_analisis['Precipitation'] = pd.to_numeric(df_analisis['Precipitation'], errors='coerce')
-        df_analisis.dropna(subset=['Anomalia_ONI', 'Precipitation'], inplace=True)
-        if not df_analisis.empty and len(df_analisis) > 1:
-            correlation = df_analisis['Anomalia_ONI'].corr(df_analisis['Precipitation'])
-            st.metric("Coeficiente de Correlación", f"{correlation:.2f}")
-        else: st.warning("No hay suficientes datos válidos para calcular la correlación.")
-    else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
+    # --- INICIO: MEJORA PESTAÑA ENSO ---
+    enso_corr_tab, enso_series_tab = st.tabs(["Correlación Precipitación-ENSO", "Series de Tiempo ENSO"])
+
+    with enso_corr_tab:
+        df_analisis = df_monthly_filtered.copy()
+        df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
+        df_analisis = pd.merge(df_analisis, df_enso, on='fecha_merge', how='left')
+        df_analisis.dropna(subset=['ENSO', 'Anomalia_ONI'], inplace=True)
+        if not df_analisis.empty:
+            st.subheader("Precipitación Media por Evento ENSO")
+            df_enso_group = df_analisis.groupby('ENSO')['Precipitation'].mean().reset_index()
+            fig_enso = px.bar(df_enso_group, x='ENSO', y='Precipitation', color='ENSO')
+            st.plotly_chart(fig_enso, use_container_width=True)
+            st.subheader("Correlación entre Anomalía ONI y Precipitación")
+            df_analisis['Anomalia_ONI'] = pd.to_numeric(df_analisis['Anomalia_ONI'], errors='coerce')
+            df_analisis['Precipitation'] = pd.to_numeric(df_analisis['Precipitation'], errors='coerce')
+            df_analisis.dropna(subset=['Anomalia_ONI', 'Precipitation'], inplace=True)
+            if not df_analisis.empty and len(df_analisis) > 1:
+                correlation = df_analisis['Anomalia_ONI'].corr(df_analisis['Precipitation'])
+                st.metric("Coeficiente de Correlación", f"{correlation:.2f}")
+            else: st.warning("No hay suficientes datos válidos para calcular la correlación.")
+        else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
+    
+    with enso_series_tab:
+        st.subheader("Visualización de Variables ENSO")
+        df_enso_filtered = df_enso[
+            (df_enso['Fecha'].dt.year >= year_range[0]) &
+            (df_enso['Fecha'].dt.year <= year_range[1]) &
+            (df_enso['Fecha'].dt.month.isin(meses_numeros))
+        ]
+        
+        variable_enso = st.selectbox(
+            "Seleccione la variable ENSO a visualizar:",
+            ['Anomalia_ONI', 'Temp_SST', 'Temp_media']
+        )
+        
+        if not df_enso_filtered.empty and variable_enso in df_enso_filtered.columns:
+            fig_enso_series = px.line(
+                df_enso_filtered,
+                x='Fecha',
+                y=variable_enso,
+                title=f"Serie de Tiempo para {variable_enso}"
+            )
+            st.plotly_chart(fig_enso_series, use_container_width=True)
+        else:
+            st.warning(f"No hay datos disponibles para '{variable_enso}' en el período seleccionado.")
+    # --- FIN: MEJORA PESTAÑA ENSO ---
 
 with tab5:
     st.header("Opciones de Descarga")
