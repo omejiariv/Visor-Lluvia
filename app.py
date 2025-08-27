@@ -5,7 +5,7 @@ import altair as alt
 import folium
 from streamlit_folium import folium_static
 import plotly.express as px
-import plotly.graph_objects as go # <--- Importante añadir esta librería
+import plotly.graph_objects as go
 import geopandas as gpd
 import zipfile
 import tempfile
@@ -115,7 +115,6 @@ gdf_municipios = load_shapefile(uploaded_zip_shapefile)
 if any(df is None for df in [df_precip_anual, df_enso, df_precip_mensual, gdf_municipios]):
     st.stop()
     
-# ... (Todo el preprocesamiento robusto se mantiene igual)
 # ENSO
 year_col_enso = next((col for col in df_enso.columns if 'año' in col.lower() or 'year' in col.lower()), None)
 month_col_enso = next((col for col in df_enso.columns if 'mes' in col.lower()), None)
@@ -210,7 +209,6 @@ df_monthly_filtered = df_monthly_for_analysis[(df_monthly_for_analysis['Nom_Est'
 tab1, tab2, tab_anim, tab3, tab4, tab5 = st.tabs(["Gráficos", "Mapa Estático", "Mapas Avanzados", "Tabla de Estaciones", "Análisis ENSO", "Descargas"])
 
 with tab1:
-    # ... (código sin cambios)
     st.header("Visualizaciones de Precipitación")
     sub_tab_anual, sub_tab_mensual, sub_tab_box = st.tabs(["Serie Anual", "Serie Mensual", "Box Plot Anual"])
     with sub_tab_anual:
@@ -231,7 +229,6 @@ with tab1:
 
 
 with tab2: # Mapa Estático
-    # ... (código sin cambios)
     st.header("Mapa de Ubicación de Estaciones")
     gdf_filtered = gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)]
     if not gdf_filtered.empty:
@@ -261,13 +258,7 @@ with tab_anim:
         st.subheader("Mapa Animado de Precipitación Anual (Puntos)")
         if not df_anual_melted.empty:
             fig_mapa_animado = px.scatter_geo(df_anual_melted, lat='Latitud_geo', lon='Longitud_geo', color='Precipitación', size='Precipitación', hover_name='Nom_Est', animation_frame='Año', projection='natural earth', title='Precipitación Anual por Estación', color_continuous_scale=px.colors.sequential.YlGnBu)
-            # --- INICIO: MEJORA DEL MAPA BASE ---
-            fig_mapa_animado.update_geos(
-                visible=True, resolution=50,
-                showcountries=True, countrycolor="Black",
-                showsubunits=True, subunitcolor="Blue"
-            )
-            # --- FIN: MEJORA DEL MAPA BASE ---
+            fig_mapa_animado.update_geos(visible=True, resolution=50, showcountries=True, countrycolor="Black", showsubunits=True, subunitcolor="Blue")
             st.plotly_chart(fig_mapa_animado, use_container_width=True)
     with anim_kriging_tab:
         st.subheader("Comparación de Mapas de Calor con Interpolación Kriging")
@@ -293,17 +284,21 @@ with tab_anim:
                             grid_lat = np.linspace(gdf_municipios.total_bounds[1], gdf_municipios.total_bounds[3], 100)
                             OK = OrdinaryKriging(lons, lats, vals, variogram_model='linear', verbose=False, enable_plotting=False)
                             z, ss = OK.execute('grid', grid_lon, grid_lat)
-                            
                             fig_kriging = px.imshow(z, x=grid_lon, y=grid_lat, origin='lower', labels=dict(color="PP (mm)"), color_continuous_scale=px.colors.sequential.YlGnBu)
                             
-                            # --- INICIO: MEJORA DE MAPA BASE CON SHAPEFILE ---
+                            # --- INICIO: CÓDIGO ROBUSTO PARA DIBUJAR SHAPEFILE ---
                             for _, row in gdf_municipios.iterrows():
-                                if row.geometry:
-                                    x, y = row.geometry.exterior.xy
-                                    fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False))
+                                if row.geometry is not None:
+                                    if row.geometry.geom_type == 'MultiPolygon':
+                                        for poly in row.geometry.geoms:
+                                            x, y = poly.exterior.xy
+                                            fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False))
+                                    elif row.geometry.geom_type == 'Polygon':
+                                        x, y = row.geometry.exterior.xy
+                                        fig_kriging.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=0.5), showlegend=False))
+                            # --- FIN: CÓDIGO ROBUSTO ---
+                            
                             fig_kriging.add_scatter(x=lons, y=lats, mode='markers', text=data_year['Nom_Est'], marker=dict(color='red', size=5), name='Estaciones', showlegend=False)
-                            # --- FIN: MEJORA DE MAPA BASE ---
-
                             st.subheader(f"Año: {year}")
                             st.plotly_chart(fig_kriging, use_container_width=True)
         else:
@@ -317,7 +312,6 @@ with tab3: # Tabla de Estaciones
     st.dataframe(df_info_table[df_info_table['Nom_Est'].isin(selected_stations)])
 
 with tab4:
-    # ... (código sin cambios)
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
     df_analisis = df_monthly_filtered.copy()
     df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
@@ -339,7 +333,6 @@ with tab4:
     else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
 
 with tab5:
-    # ... (código sin cambios)
     st.header("Opciones de Descarga")
     sub_tab_orig, sub_tab_comp = st.tabs(["Descargar Datos Filtrados", "Descargar Series Completadas"])
     with sub_tab_orig:
