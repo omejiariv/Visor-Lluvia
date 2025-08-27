@@ -127,7 +127,7 @@ df_enso[month_col_enso] = pd.to_numeric(df_enso[month_col_enso], errors='coerce'
 df_enso.dropna(subset=[year_col_enso, month_col_enso], inplace=True)
 df_enso = df_enso.astype({year_col_enso: int, month_col_enso: int})
 df_enso['fecha_merge'] = pd.to_datetime(df_enso[year_col_enso].astype(str) + '-' + df_enso[month_col_enso].astype(str), errors='coerce').dt.strftime('%Y-%m')
-df_enso['Fecha'] = pd.to_datetime(df_enso['fecha_merge'])
+df_enso['Fecha'] = pd.to_datetime(df_enso['fecha_merge']) 
 df_enso.dropna(subset=['fecha_merge', 'Fecha'], inplace=True)
 for col in ['Anomalia_ONI', 'Temp_SST', 'Temp_media']:
     if col in df_enso.columns:
@@ -212,15 +212,18 @@ with tab1:
     st.header("Visualizaciones de Precipitación")
     sub_tab_anual, sub_tab_mensual, sub_tab_box = st.tabs(["Serie Anual", "Serie Mensual", "Box Plot Anual"])
     
-    # --- INICIO: PREPARACIÓN DE DATOS Y ESCALA DE COLOR PARA GRÁFICOS ENSO ---
+    # Preparación de datos y escala de color para gráficos ENSO
     df_enso['Año'] = df_enso['Fecha'].dt.year
     df_enso_anual = df_enso.groupby('Año')['ENSO'].agg(lambda x: x.mode().iloc[0]).reset_index()
     enso_color_scale = alt.Scale(domain=['El Niño', 'La Niña', 'Neutral'], range=['#E67C73', '#7BAAF7', '#E0E0E0'])
-    # --- FIN: PREPARACIÓN ---
 
     with sub_tab_anual:
-        st.subheader("Precipitación Anual (mm)") # Título cambiado
+        st.subheader("Precipitación Anual (mm)")
         if not df_anual_melted.empty:
+            # --- INICIO: CORRECCIÓN DE TIPO DE DATO PARA MERGE ---
+            df_anual_melted['Año'] = df_anual_melted['Año'].astype(int)
+            # --- FIN: CORRECCIÓN ---
+            
             df_anual_chart_data = pd.merge(df_anual_melted, df_enso_anual, on='Año', how='left')
             line = alt.Chart(df_anual_chart_data).mark_line().encode(x='Año:O', y='Precipitación:Q', color='Nom_Est:N')
             points = alt.Chart(df_anual_chart_data).mark_point(size=80, filled=True).encode(
@@ -232,8 +235,9 @@ with tab1:
             st.altair_chart(chart_anual, use_container_width=True)
     
     with sub_tab_mensual:
-        st.subheader("Precipitación Mensual (mm)") # Título cambiado
+        st.subheader("Precipitación Mensual (mm)")
         if not df_monthly_filtered.empty:
+            df_monthly_filtered['fecha_merge'] = df_monthly_filtered['Fecha'].dt.strftime('%Y-%m')
             df_monthly_chart_data = pd.merge(df_monthly_filtered, df_enso[['fecha_merge', 'ENSO']], on='fecha_merge', how='left')
             line_m = alt.Chart(df_monthly_chart_data).mark_line().encode(x='Fecha:T', y='Precipitation:Q', color='Nom_Est:N')
             points_m = alt.Chart(df_monthly_chart_data).mark_point(size=60, filled=True).encode(
@@ -252,8 +256,8 @@ with tab1:
 
 
 with tab2: # Mapa Estático
-    # ... (código sin cambios)
     st.header("Mapa de Ubicación de Estaciones")
+    # ... (código sin cambios)
     gdf_filtered = gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)]
     if not gdf_filtered.empty:
         map_centering = st.radio("Opciones de centrado", ("Automático", "Predefinido"), horizontal=True, key='map_radio')
@@ -278,24 +282,17 @@ with tab2: # Mapa Estático
 with tab_anim:
     st.header("Mapas Avanzados")
     anim_points_tab, anim_kriging_tab = st.tabs(["Animación de Puntos", "Análisis Kriging"])
+    
     with anim_points_tab:
         st.subheader("Mapa Animado de Precipitación Anual (Puntos)")
-        
-        # --- INICIO: REUBICACIÓN DE CONTROLES DE ZOOM ---
         map_col, control_col = st.columns([4, 1])
         with control_col:
             st.markdown("###### Controles de Zoom")
-            if st.button("Ajustar a Selección", key='zoom_select'):
-                st.session_state.anim_map_view = 'fit'
-            if st.button("Ver Antioquia", key='zoom_ant'):
-                st.session_state.anim_map_view = 'antioquia'
-            if st.button("Ver Colombia", key='zoom_col'):
-                st.session_state.anim_map_view = 'colombia'
-        # --- FIN: REUBICACIÓN ---
-
+            if st.button("Ajustar a Selección", key='zoom_select'): st.session_state.anim_map_view = 'fit'
+            if st.button("Ver Antioquia", key='zoom_ant'): st.session_state.anim_map_view = 'antioquia'
+            if st.button("Ver Colombia", key='zoom_col'): st.session_state.anim_map_view = 'colombia'
         if 'anim_map_view' not in st.session_state:
             st.session_state.anim_map_view = 'fit'
-        
         with map_col:
             if not df_anual_melted.empty:
                 fig_mapa_animado = px.scatter_geo(df_anual_melted, lat='Latitud_geo', lon='Longitud_geo', color='Precipitación', size='Precipitación', hover_name='Nom_Est', animation_frame='Año', projection='natural earth', title='Precipitación Anual por Estación', color_continuous_scale=px.colors.sequential.YlGnBu)
@@ -307,14 +304,13 @@ with tab_anim:
                      fig_mapa_animado.update_geos(center={"lat": 4.5709, "lon": -74.2973}, projection_scale=5, visible=True, resolution=50)
                 fig_mapa_animado.update_layout(height=700)
                 st.plotly_chart(fig_mapa_animado, use_container_width=True)
-            
+
     with anim_kriging_tab:
         # ... (código sin cambios)
         st.subheader("Comparación de Mapas de Precipitación y Varianza (Kriging)")
         # ...
 
 with tab3: # Tabla de Estaciones
-    # ... (código sin cambios)
     st.header("Información Detallada de las Estaciones")
     df_mean_precip = df_anual_melted.groupby('Nom_Est')['Precipitación'].mean().round(2).reset_index()
     df_mean_precip.rename(columns={'Precipitación': 'Precipitación media anual (mm)'}, inplace=True)
@@ -323,9 +319,9 @@ with tab3: # Tabla de Estaciones
 
 with tab4:
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
-    # ... (código con sub-pestañas y gráficos ENSO)
     enso_corr_tab, enso_series_tab = st.tabs(["Correlación Precipitación-ENSO", "Series de Tiempo ENSO"])
     with enso_corr_tab:
+        # ... (código sin cambios)
         df_analisis = df_monthly_filtered.copy()
         df_analisis['fecha_merge'] = df_analisis['Fecha'].dt.strftime('%Y-%m')
         df_analisis = pd.merge(df_analisis, df_enso, on='fecha_merge', how='left')
@@ -344,7 +340,6 @@ with tab4:
                 st.metric("Coeficiente de Correlación", f"{correlation:.2f}")
             else: st.warning("No hay suficientes datos válidos para calcular la correlación.")
         else: st.warning("No hay suficientes datos para realizar el análisis ENSO con la selección actual.")
-    
     with enso_series_tab:
         st.subheader("Visualización de Variables ENSO")
         df_enso_filtered = df_enso[(df_enso['Fecha'].dt.year >= year_range[0]) & (df_enso['Fecha'].dt.year <= year_range[1]) & (df_enso['Fecha'].dt.month.isin(meses_numeros))]
@@ -357,7 +352,6 @@ with tab4:
 
 with tab5:
     st.header("Opciones de Descarga")
-    # ... (código sin cambios)
     sub_tab_orig, sub_tab_comp = st.tabs(["Descargar Datos Filtrados", "Descargar Series Completadas"])
     with sub_tab_orig:
         st.markdown("**Datos de Precipitación Anual (Filtrados)**")
