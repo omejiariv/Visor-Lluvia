@@ -27,6 +27,8 @@ except ImportError:
 
 #--- Configuración de la página
 st.set_page_config(layout="wide", page_title="Visor de Precipitación y ENSO")
+
+# CSS para optimizar el espacio
 st.markdown("""
 <style>
 div.block-container {padding-top: 2rem;}
@@ -38,7 +40,6 @@ h1 { margin-top: 0px; padding-top: 0px; }
 #--- Funciones de Carga y Procesamiento ---
 @st.cache_data
 def load_data(file_path):
-    # ... (código sin cambios)
     if file_path is None: return None
     try:
         content = file_path.getvalue()
@@ -65,7 +66,6 @@ def load_data(file_path):
     st.error(f"No se pudo decodificar el archivo '{file_path.name}'.")
     return None
 
-# --- INICIO: FUNCIÓN load_shapefile RESTAURADA A SU VERSIÓN MÁS ROBUSTA ---
 @st.cache_data
 def load_shapefile(file_path):
     try:
@@ -75,22 +75,17 @@ def load_shapefile(file_path):
             shp_path = [f for f in os.listdir(temp_dir) if f.endswith('.shp')][0]
             gdf = gpd.read_file(os.path.join(temp_dir, shp_path))
             gdf.columns = gdf.columns.str.strip()
-            
-            # Si el archivo no tiene un CRS definido, se lo asignamos explícitamente.
             if gdf.crs is None:
-                gdf = gdf.set_crs("EPSG:9377") # Asignación explícita y robusta
-            
-            return gdf.to_crs("EPSG:4326") # Transformación a WGS84
+                gdf = gdf.set_crs("EPSG:9377")
+            return gdf.to_crs("EPSG:4326")
     except Exception as e:
         st.error(f"Error al procesar el shapefile: {e}")
         return None
-# --- FIN: FUNCIÓN CORREGIDA ---
 
 #--- Interfaz y Carga de Archivos ---
 st.title('Visor de Precipitación y Fenómeno ENSO')
 st.sidebar.header("Panel de Control")
 with st.sidebar.expander("**Cargar Archivos**", expanded=True):
-    st.info("Cargue los archivos de precipitación que ya contienen las columnas ENSO.")
     uploaded_file_mapa = st.file_uploader("1. Archivo de estaciones con ENSO Anual", type="csv")
     uploaded_file_precip = st.file_uploader("2. Archivo de precipitación con ENSO Mensual", type="csv")
     uploaded_file_enso = st.file_uploader("3. Archivo completo de ENSO (para análisis avanzado)", type="csv")
@@ -123,10 +118,14 @@ gdf_stations['Latitud_geo'] = gdf_stations.geometry.y
 
 # Precipitación Mensual (ya enriquecida)
 df_precip_mensual.columns = [col.lower() for col in df_precip_mensual.columns]
-year_col_precip = next((col for col in df_precip_mensual.columns if 'año' in col), None)
+
+# --- INICIO: CORRECCIÓN EN LA BÚSQUEDA DE COLUMNA DE AÑO ---
+year_col_precip = next((col for col in df_precip_mensual.columns if 'año' in col or 'ano' in col), None)
+# --- FIN: CORRECCIÓN ---
+
 enso_mes_col_precip = next((col for col in df_precip_mensual.columns if 'enso_mes' in col or 'enso-mes' in col), None)
 if not all([year_col_precip, enso_mes_col_precip]):
-    st.error(f"No se encontraron 'año' o 'enso_mes' en el archivo de precipitación mensual.")
+    st.error(f"No se encontraron 'año'/'ano' o 'enso_mes' en el archivo de precipitación mensual.")
     st.stop()
 df_precip_mensual.rename(columns={year_col_precip: 'Año', enso_mes_col_precip: 'ENSO'}, inplace=True)
 
@@ -187,7 +186,7 @@ df_anual_filtered = df_anual_melted[(df_anual_melted['Año'] >= year_range[0]) &
 df_monthly_filtered = df_long[(df_long['Nom_Est'].isin(selected_stations)) & (df_long['Fecha'].dt.year >= year_range[0]) & (df_long['Fecha'].dt.year <= year_range[1]) & (df_long['Fecha'].dt.month.isin(meses_numeros))]
 
 #--- Pestañas Principales ---
-tab1, tab2, tab_anim, tab3, tab4, tab5 = st.tabs(["Gráficos", "Mapa de Estaciones", "Mapas Avanzados", "Tabla de Estaciones", "Análisis ENSO", "Descargas"])
+tab1, tab2, tab_anim, tab3, tab4 = st.tabs(["Gráficos", "Mapa de Estaciones", "Mapas Avanzados", "Tabla de Estaciones", "Análisis ENSO"])
 
 with tab1:
     st.header("Visualizaciones de Precipitación")
@@ -208,7 +207,3 @@ with tab3:
 with tab4:
     st.header("Análisis ENSO Avanzado")
     # ... (código de análisis ENSO sin cambios)
-    
-with tab5:
-    st.header("Descargas")
-    # ... (código de descargas sin cambios)
