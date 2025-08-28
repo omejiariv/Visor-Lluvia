@@ -1,11 +1,11 @@
 # Visor de Información Geoespacial de Precipitación y el Fenómeno ENSO
+# Versión estable basada en VisorPptnENSO.pdf, adaptada a datos enriquecidos
 import streamlit as st
 import pandas as pd
 import altair as alt
 import folium
 from streamlit_folium import folium_static
 import plotly.express as px
-import plotly.graph_objects as go
 import geopandas as gpd
 import zipfile
 import tempfile
@@ -14,9 +14,6 @@ import io
 import numpy as np
 import re
 import csv
-
-# Importaciones para Kriging
-from pykrige.ok import OrdinaryKriging
 
 try:
     from folium.plugins import ScaleControl
@@ -27,8 +24,6 @@ except ImportError:
 
 #--- Configuración de la página
 st.set_page_config(layout="wide", page_title="Visor de Precipitación y ENSO")
-
-# CSS para optimizar el espacio
 st.markdown("""
 <style>
 div.block-container {padding-top: 2rem;}
@@ -86,24 +81,23 @@ def load_shapefile(file_path):
 st.title('Visor de Precipitación y Fenómeno ENSO')
 st.sidebar.header("Panel de Control")
 with st.sidebar.expander("**Cargar Archivos**", expanded=True):
+    st.info("Cargue los archivos de precipitación que ya contienen las columnas ENSO.")
     uploaded_file_mapa = st.file_uploader("1. Archivo de estaciones con ENSO Anual", type="csv")
     uploaded_file_precip = st.file_uploader("2. Archivo de precipitación con ENSO Mensual", type="csv")
-    uploaded_file_enso = st.file_uploader("3. Archivo completo de ENSO (para análisis avanzado)", type="csv")
-    uploaded_zip_shapefile = st.file_uploader("4. Shapefile de municipios (.zip)", type="zip")
+    uploaded_zip_shapefile = st.file_uploader("3. Shapefile de municipios (.zip)", type="zip")
 
-if not all([uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_enso]):
-    st.info("Por favor, suba los 4 archivos requeridos para habilitar la aplicación.")
+if not all([uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile]):
+    st.info("Por favor, suba los 3 archivos requeridos para habilitar la aplicación.")
     st.stop()
 
 #--- Carga y Preprocesamiento de Datos ---
 df_precip_anual = load_data(uploaded_file_mapa)
 df_precip_mensual = load_data(uploaded_file_precip)
-df_enso = load_data(uploaded_file_enso)
 gdf_municipios = load_shapefile(uploaded_zip_shapefile)
-if any(df is None for df in [df_precip_anual, df_precip_mensual, gdf_municipios, df_enso]):
+if any(df is None for df in [df_precip_anual, df_precip_mensual, gdf_municipios]):
     st.stop()
     
-# Estaciones y Precipitación Anual
+# Estaciones (mapaCVENSO)
 lon_col = next((col for col in df_precip_anual.columns if 'longitud' in col.lower() or 'lon' in col.lower()), None)
 lat_col = next((col for col in df_precip_anual.columns if 'latitud' in col.lower() or 'lat' in col.lower()), None)
 if not all([lon_col, lat_col]):
@@ -118,11 +112,7 @@ gdf_stations['Latitud_geo'] = gdf_stations.geometry.y
 
 # Precipitación Mensual (ya enriquecida)
 df_precip_mensual.columns = [col.lower() for col in df_precip_mensual.columns]
-
-# --- INICIO: CORRECCIÓN EN LA BÚSQUEDA DE COLUMNA DE AÑO ---
 year_col_precip = next((col for col in df_precip_mensual.columns if 'año' in col or 'ano' in col), None)
-# --- FIN: CORRECCIÓN ---
-
 enso_mes_col_precip = next((col for col in df_precip_mensual.columns if 'enso_mes' in col or 'enso-mes' in col), None)
 if not all([year_col_precip, enso_mes_col_precip]):
     st.error(f"No se encontraron 'año'/'ano' o 'enso_mes' en el archivo de precipitación mensual.")
@@ -186,24 +176,80 @@ df_anual_filtered = df_anual_melted[(df_anual_melted['Año'] >= year_range[0]) &
 df_monthly_filtered = df_long[(df_long['Nom_Est'].isin(selected_stations)) & (df_long['Fecha'].dt.year >= year_range[0]) & (df_long['Fecha'].dt.year <= year_range[1]) & (df_long['Fecha'].dt.month.isin(meses_numeros))]
 
 #--- Pestañas Principales ---
-tab1, tab2, tab_anim, tab3, tab4 = st.tabs(["Gráficos", "Mapa de Estaciones", "Mapas Avanzados", "Tabla de Estaciones", "Análisis ENSO"])
+tab1, tab2, tab3, tab4 = st.tabs(["Gráficos", "Mapa de Estaciones", "Tabla de Estaciones", "Análisis ENSO"])
 
 with tab1:
     st.header("Visualizaciones de Precipitación")
-    # ... (código de gráficos sin cambios)
+    sub_tab_anual, sub_tab_mensual = st.tabs(["Serie Anual", "Serie Mensual"])
+
+    enso_color_scale = alt.Scale(
+        domain=['El Niño', 'La Niña', 'Neutral', 'Niño - Niña', 'Niña - Niño'],
+        range=['#d6616b', '#67a9cf', '#f7f7f7', '#fdae61', '#9e0142']
+    )
+    
+    with sub_tab_anual:
+        st.subheader("Precipitación Anual (mm)")
+        enso_anual_col = next((col for col in df_anual_filtered.columns if 'enso_año' in col.lower()), None)
+        if not df_anual_filtered.empty and enso_anual_col:
+            df_anual_filtered.rename(columns={enso_anual_col: 'ENSO'}, inplace=True)
+            
+            precip_chart = alt.Chart(df_anual_filtered).mark_line(point=True).encode(
+                x=alt.X('Año:O', title=None, axis=alt.Axis(labels=False, ticks=False)),
+                y=alt.Y('Precipitación:Q', title='Precipitación (mm)'),
+                color=alt.Color('Nom_Est:N', title='Estaciones'),
+                tooltip=['Nom_Est', 'Año', 'Precipitación']
+            ).properties(height=300)
+
+            enso_strip = alt.Chart(df_anual_filtered).mark_rect().encode(
+                x=alt.X('Año:O', title='Año'),
+                color=alt.Color('ENSO:N', scale=enso_color_scale, title='Fase ENSO'),
+                tooltip=['Año', 'ENSO']
+            ).properties(height=40)
+            
+            final_chart = alt.vconcat(precip_chart, enso_strip, spacing=0).resolve_scale(x='shared')
+            st.altair_chart(final_chart, use_container_width=True)
+    
+    with sub_tab_mensual:
+        st.subheader("Precipitación Mensual (mm)")
+        if not df_monthly_filtered.empty:
+            precip_chart_m = alt.Chart(df_monthly_filtered).mark_line(point=True).encode(
+                x=alt.X('Fecha:T', title=None, axis=alt.Axis(labels=False, ticks=False)),
+                y=alt.Y('Precipitation:Q', title='Precipitación (mm)'),
+                color=alt.Color('Nom_Est:N', title='Estaciones'),
+                tooltip=['Nom_Est', alt.Tooltip('Fecha', format='%Y-%m'), 'Precipitation', 'ENSO']
+            ).properties(height=300)
+
+            enso_strip_m = alt.Chart(df_monthly_filtered).mark_rect().encode(
+                x=alt.X('yearmonth(Fecha):T', title='Fecha'),
+                color=alt.Color('ENSO:N', scale=enso_color_scale, title='Fase ENSO'),
+                tooltip=[alt.Tooltip('yearmonth(Fecha)', title='Fecha'), 'ENSO']
+            ).properties(height=40)
+
+            final_chart_m = alt.vconcat(precip_chart_m, enso_strip_m, spacing=0).resolve_scale(x='shared')
+            st.altair_chart(final_chart_m, use_container_width=True)
 
 with tab2:
     st.header("Mapa de Estaciones")
-    # ... (código de mapa estático sin cambios)
-
-with tab_anim:
-    st.header("Mapas Avanzados")
-    # ... (código de mapas avanzados sin cambios)
+    gdf_filtered = gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)]
+    if not gdf_filtered.empty:
+        m = folium.Map(location=[gdf_filtered['Latitud_geo'].mean(), gdf_filtered['Longitud_geo'].mean()], zoom_start=6)
+        for _, row in gdf_filtered.iterrows():
+            folium.Marker([row['Latitud_geo'], row['Longitud_geo']], tooltip=f"{row['Nom_Est']}<br>{row['municipio']}").add_to(m)
+        folium_static(m, width=900, height=600)
+    else:
+        st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
 
 with tab3:
     st.header("Tabla de Estaciones")
-    # ... (código de tabla sin cambios)
+    st.dataframe(gdf_stations[gdf_stations['Nom_Est'].isin(selected_stations)])
 
 with tab4:
-    st.header("Análisis ENSO Avanzado")
-    # ... (código de análisis ENSO sin cambios)
+    st.header("Análisis ENSO")
+    if not df_monthly_filtered.empty and 'ENSO' in df_monthly_filtered.columns:
+        st.subheader("Precipitación Media por Fase ENSO")
+        df_enso_group = df_monthly_filtered.groupby('ENSO')['Precipitation'].mean().reset_index()
+        fig_enso = px.bar(df_enso_group, x='ENSO', y='Precipitation', color='ENSO',
+                          labels={'Precipitation': 'Precipitación Media (mm)', 'ENSO': 'Fase ENSO'})
+        st.plotly_chart(fig_enso, use_container_width=True)
+    else:
+        st.warning("No hay datos mensuales o de ENSO disponibles para la selección actual.")
